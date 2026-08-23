@@ -1,0 +1,60 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "phoe-lone-server"
+version = "0.1.0"
+description = "XiaoZhi-compatible FastAPI backend for the Phoe Lone ESP32 robot"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.115.6",
+    "uvicorn[standard]>=0.34.0",
+    "websockets>=14.1",
+    "pydantic-settings>=2.7.0",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "asyncpg>=0.30.0",
+    "alembic>=1.14.0",
+    "redis>=5.2.1",
+    "httpx>=0.28.1",
+    "google-genai>=2.18.0",
+    "edge-tts>=7.0.0",
+    "opuslib-next>=1.1.5",
+    "pysilero-vad>=3.0.0",
+    "prometheus-client>=0.21.1",
+    "structlog>=24.4.0",
+    "orjson>=3.10.12",
+    "typer>=0.15.1",
+    "python-multipart>=0.0.20",
+    "greenlet>=3.1.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.4",
+    "pytest-asyncio>=0.25.0",
+    "pytest-cov>=6.0.0",
+    "ruff>=0.8.6",
+]
+
+[project.scripts]
+phoe-lone = "app.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

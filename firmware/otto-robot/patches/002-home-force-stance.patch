@@ -1,0 +1,26 @@
+--- a/main/boards/otto-robot/otto_movements.cc
++++ b/main/boards/otto-robot/otto_movements.cc
+@@ -230,8 +230,10 @@
+ //-- HOME = Otto at rest position -------------------------------//
+ ///////////////////////////////////////////////////////////////////
+ void Otto::Home(bool hands_down) {
+-    if (is_otto_resting_ == false) { // Go to rest position only if necessary
+-        // 为所有舵机准备初始位置值
++    // Always re-apply stance. Skipping when is_otto_resting_ was true left PWM
++    // at duty 0 after Attach/Detach races on stop, so the robot sagged.
++    {
+         int homes[SERVO_COUNT];
+         int max_delta = 0;
+         for (int i = 0; i < SERVO_COUNT; i++) {
+@@ -261,9 +263,9 @@
+             MoveServos(duration, homes);
+         }
+         is_otto_resting_ = true;
+-    }
+-
++    }
+     vTaskDelay(pdMS_TO_TICKS(200));
+ }
+ 
+ bool Otto::GetRestState() {
+     return is_otto_resting_;

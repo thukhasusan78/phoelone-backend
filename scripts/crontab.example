@@ -1,0 +1,2 @@
+# Daily at 03:00 UTC
+# 0 3 * * * /root/phoe_lone_server/scripts/backup.sh >> /var/log/phoe-lone-backup.log 2>&1

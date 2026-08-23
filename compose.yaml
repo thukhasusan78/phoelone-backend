@@ -1,0 +1,101 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://phoe:${POSTGRES_PASSWORD:-phoe}@postgres:5432/phoe_lone
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    expose:
+      - "8000"
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: "2.0"
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://phoe:${POSTGRES_PASSWORD:-phoe}@postgres:5432/phoe_lone
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: phoe
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-phoe}
+      POSTGRES_DB: phoe_lone
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U phoe -d phoe_lone"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    expose:
+      - "5432"
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    expose:
+      - "6379"
+
+  caddy:
+    image: caddy:2.9-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+      ACME_EMAIL: ${ACME_EMAIL:-ops@localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  caddy_data:
+  caddy_config:

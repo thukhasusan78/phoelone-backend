@@ -1,0 +1,27 @@
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		-Server
+	}
+	request_body {
+		max_size 2MB
+	}
+	reverse_proxy api:8000 {
+		flush_interval -1
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Real-IP {remote_host}
+	}
+}
+
+# Local / IP-only fallback when DOMAIN=localhost
+http://:80 {
+	reverse_proxy api:8000 {
+		flush_interval -1
+	}
+}

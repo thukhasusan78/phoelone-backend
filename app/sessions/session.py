@@ -1,0 +1,1594 @@
+from __future__ import annotations
+
+import asyncio
+import io
+import re
+import time
+import uuid
+import wave
+from collections import deque
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import httpx
+from fastapi import WebSocket, WebSocketDisconnect
+from pydantic import ValidationError
+from starlette.websockets import WebSocketState
+
+from app.ai.gemini import Brain, FunctionCall, TurnResult, is_transient_gemini_error
+from app.ai.tool_router import ToolRouter, canonical_tool_name
+from app.audio.edge_tts import EdgeTtsClient, TtsError
+from app.audio.opus import (
+    CodecError,
+    create_codec,
+    iter_pcm_frames,
+    iter_pcm_frames_from_audio_stream,
+    iter_pcm_frames_from_file,
+    iter_pcm_frames_from_mp3,
+    iter_pcm_frames_from_subprocess,
+    media_to_pcm24k,
+    mp3_to_pcm24k,
+)
+from app.audio.pacer import pace_opus_frames, pace_opus_stream
+from app.audio.speech_gate import create_speech_gate
+from app.audio.text import FALLBACK_BURMESE, cap_text, chunk_burmese, sanitize_for_tts
+from app.config import Settings
+from app.mcp.client import McpClient, McpError
+from app.observability.logging import get_logger
+from app.observability.metrics import (
+    AUDIO_GATE,
+    FRAMES_DROPPED,
+    QUEUE_DEPTH,
+    SESSIONS_ACTIVE,
+    STAGE_LATENCY,
+    TURN_LATENCY,
+    TURNS,
+)
+from app.protocol.messages import alert, keepalive, llm_emotion, server_hello, stt, tts
+from app.protocol.models import (
+    KNOWN_EMOTIONS,
+    AbortMessage,
+    DeviceHello,
+    ListenMessage,
+    McpEnvelope,
+)
+from app.protocol.state import SessionState, StateMachine
+from app.tools.http import HttpGuardError, assert_public_https
+from app.tools.local_music import music_local_root, resolve_local_music_path
+from app.tools.music import (
+    device_music_call,
+    is_music_play_request,
+    is_youtube_playback,
+    music_payload_for_llm,
+    music_search_query,
+    ytdlp_stream_cmd,
+)
+from app.tools.otto_gate import (
+    OTTO_MOTION_TOOLS,
+    looks_like_noise_utterance,
+    parse_otto_moving,
+    should_dispatch_otto_tool,
+)
+
+log = get_logger(__name__)
+
+# Uplink Opus frame is 60 ms @ 16 kHz mono PCM16.
+_UPLINK_FRAME_SECONDS = 0.06
+# Hold ~2s of gated PCM while Gemini Live connects so wake speech is not lost.
+_UPLINK_HOLD_FRAMES = 33
+_DEBUG_WAV = Path(__file__).resolve().parents[2] / "debug_live_input.wav"
+
+_FAREWELL_PHRASES = frozenset(
+    {
+        "bye",
+        "bye bye",
+        "goodbye",
+        "good bye",
+        "see you",
+        "see ya",
+        "talk later",
+        "ဘိုင်း",
+        "ဘိုင်ဘိုင်",
+        "ဂွတ်ဘိုင်",
+        "နှုတ်ဆက်ပါ",
+        "နှုတ်ဆက်ပါတယ်",
+        "သွားတော့မယ်",
+        "သွားပြီ",
+    }
+)
+
+
+@dataclass
+class PendingMusic:
+    track: str
+    artist: str
+    stream_url: str
+    source: str
+    preview: bool
+    device_tool: str | None = None
+    device_args: dict[str, Any] | None = None
+
+
+_BUFFERED_MUSIC_TYPES = {
+    "audio/mp4",
+    "audio/aac",
+    "audio/x-m4a",
+    "audio/m4a",
+    "video/mp4",
+}
+
+
+def _music_content_type(header: str) -> str:
+    return (header or "").split(";")[0].strip().lower()
+
+
+def _music_stream_pipe_friendly(content_type: str, head: bytes) -> bool:
+    """MP4/AAC previews need a seekable file; MP3/Ogg/WAV can decode from a pipe."""
+    ct = _music_content_type(content_type)
+    if ct in _BUFFERED_MUSIC_TYPES:
+        return False
+    if len(head) >= 8 and head[4:8] == b"ftyp":
+        return False
+    return True
+
+
+def _ffmpeg_input_format(content_type: str, head: bytes) -> str | None:
+    ct = _music_content_type(content_type)
+    if "mpeg" in ct or "mp3" in ct or head.startswith(b"ID3"):
+        return "mp3"
+    if "ogg" in ct or head.startswith(b"OggS"):
+        return "ogg"
+    if "wav" in ct or head.startswith(b"RIFF"):
+        return "wav"
+    if len(head) >= 2 and head[:2] in {b"\xff\xfb", b"\xff\xf3", b"\xff\xf2", b"\xff\xfa"}:
+        return "mp3"
+    return None
+
+
+def _normalize_farewell(text: str) -> str:
+    cleaned = re.sub(r"[^\w\s\u1000-\u109F]+", " ", text.strip(), flags=re.UNICODE)
+    return " ".join(cleaned.split()).casefold()
+
+
+def _pcm16le_mono_to_wav_bytes(pcm: bytes, sample_rate_hz: int = 16000) -> bytes:
+    if not pcm:
+        return b""
+    if len(pcm) % 2 != 0:
+        pcm = pcm[:-1]
+    out = io.BytesIO()
+    with wave.open(out, mode="wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate_hz)
+        wf.writeframes(pcm)
+    return out.getvalue()
+
+
+class Outbound:
+    __slots__ = ("kind", "payload", "generation")
+
+    def __init__(self, kind: str, payload: str | bytes, generation: int) -> None:
+        self.kind = kind
+        self.payload = payload
+        self.generation = generation
+
+
+class DeviceSession:
+    def __init__(
+        self,
+        websocket: WebSocket,
+        settings: Settings,
+        device_id: str,
+        client_id: str,
+        router: ToolRouter,
+        tts_client: EdgeTtsClient,
+        brain_factory,
+        authorization: str | None = None,
+        client_ip: str | None = None,
+    ) -> None:
+        self.ws = websocket
+        self.settings = settings
+        self.device_id = device_id
+        self.client_id = client_id
+        self.router = router
+        self.tts_client = tts_client
+        self.brain_factory = brain_factory
+        self.authorization = authorization
+        self.client_ip = client_ip
+        self.device_location = None
+        self.session_id = str(uuid.uuid4())
+        self.state = StateMachine()
+        self.codec = create_codec()
+        self.mcp = McpClient(self.session_id, self._queue_json, timeout_s=settings.mcp_timeout_s)
+        self.brain: Brain | None = None
+        self.out_queue: asyncio.Queue[Outbound | None] = asyncio.Queue(settings.outbound_queue_size)
+        self._writer_task: asyncio.Task | None = None
+        self._keepalive_task: asyncio.Task | None = None
+        self._turn_task: asyncio.Task | None = None
+        self._listen_started_at = 0.0
+        self._utterance_bytes = 0
+        self._last_rx = time.monotonic()
+        self._last_uplink = 0.0
+        self._closed = False
+        self._close_after_chat = False
+        self._emotion = "happy"
+        self._listen_mode = "auto"
+        self._pcm_started = False
+        self._forwarded_seconds = 0.0
+        self._forward_capped = False
+        self._pcm_debug = bytearray()
+        self._awaiting_tts_stop = False
+        self._gate = self._new_gate()
+        self._brain_ready = False
+        self._begin_task: asyncio.Task | None = None
+        self._pcm_hold: deque[bytes] = deque(maxlen=_UPLINK_HOLD_FRAMES)
+        self._last_gate_key: tuple[str, str] | None = None
+        self._uplink_ignored_logged = False
+        self._tts_played = False
+        self._pending_music: PendingMusic | None = None
+
+    def _tool_context(self, user_text: str | None = None) -> dict[str, Any]:
+        ctx: dict[str, Any] = {}
+        if self.client_ip:
+            ctx["client_ip"] = self.client_ip
+        if user_text:
+            ctx["user_text"] = user_text
+        loc = self.device_location
+        if loc is not None:
+            if loc.city:
+                ctx["device_city"] = loc.city
+            if loc.latitude is not None:
+                ctx["device_latitude"] = loc.latitude
+            if loc.longitude is not None:
+                ctx["device_longitude"] = loc.longitude
+        return ctx
+
+    def _log_state(self, target: SessionState, *, previous: SessionState | None = None) -> None:
+        prev = previous if previous is not None else self.state.state
+        if prev == target:
+            return
+        log.info(
+            "session.state",
+            from_state=prev.value,
+            to_state=target.value,
+            generation=self.state.generation,
+            session_id=self.session_id,
+        )
+
+    def _set_state(self, target: SessionState, *, force: bool = False) -> None:
+        prev = self.state.state
+        if prev == target:
+            return
+        if force:
+            self.state.state = target
+        else:
+            try:
+                self.state.transition(target)
+            except Exception:
+                self.state.state = target
+        self._log_state(target, previous=prev)
+
+    async def _request_exit(self) -> None:
+        self._close_after_chat = True
+        log.info("session.exit_requested", session_id=self.session_id)
+
+    def _is_farewell(self, text: str) -> bool:
+        normalized = _normalize_farewell(text)
+        return normalized in _FAREWELL_PHRASES
+
+    async def _maybe_close_after_chat(self) -> None:
+        if self._close_after_chat and not self._closed:
+            log.info("session.close_after_chat", session_id=self.session_id)
+            await self.close()
+
+    def _new_gate(self):
+        return create_speech_gate(
+            backend=self.settings.vad_backend,
+            speech_threshold=self.settings.vad_speech_threshold,
+            min_speech_ms=self.settings.vad_min_speech_ms,
+            min_silence_ms=self.settings.vad_min_silence_ms,
+            preroll_chunks=self.settings.vad_preroll_chunks,
+            energy_speech_rms=self.settings.vad_energy_speech_rms,
+            warmup_ms=self.settings.vad_warmup_ms,
+            warmup_energy_rms=self.settings.vad_warmup_energy_rms,
+        )
+
+    async def run(self) -> None:
+        SESSIONS_ACTIVE.inc()
+        self._writer_task = asyncio.create_task(self._writer_loop())
+        self._keepalive_task = asyncio.create_task(self._keepalive_loop())
+        try:
+            await self._handshake()
+            receive_task = asyncio.create_task(self._receive_loop())
+            try:
+                await self._discover_mcp()
+                await receive_task
+            finally:
+                if not receive_task.done():
+                    receive_task.cancel()
+                    try:
+                        await receive_task
+                    except (asyncio.CancelledError, Exception):
+                        pass
+        except WebSocketDisconnect:
+            log.info("session.disconnect", session_id=self.session_id)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("session.error", session_id=self.session_id, error=str(exc))
+        finally:
+            await self.close()
+
+    async def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self.state.close()
+        await self._cancel_turn()
+        if self.brain:
+            await self.brain.close()
+        self.mcp.cancel_pending()
+        if self._keepalive_task:
+            self._keepalive_task.cancel()
+        await self.out_queue.put(None)
+        if self._writer_task:
+            try:
+                await asyncio.wait_for(self._writer_task, timeout=2)
+            except Exception:  # noqa: BLE001
+                self._writer_task.cancel()
+        if self.ws.client_state == WebSocketState.CONNECTED:
+            try:
+                await self.ws.close()
+            except Exception:  # noqa: BLE001
+                pass
+        SESSIONS_ACTIVE.dec()
+
+    async def _handshake(self) -> None:
+        try:
+            raw = await asyncio.wait_for(
+                self.ws.receive_text(), timeout=self.settings.hello_timeout_s
+            )
+        except (TimeoutError, asyncio.TimeoutError) as exc:
+            raise RuntimeError("hello timeout") from exc
+        self._last_rx = time.monotonic()
+        try:
+            hello = DeviceHello.model_validate_json(raw)
+        except ValidationError as exc:
+            raise RuntimeError("invalid hello") from exc
+        if hello.transport != "websocket":
+            raise RuntimeError("unsupported transport")
+        if hello.version != 1:
+            raise RuntimeError("unsupported protocol version")
+        params = hello.audio_params
+        if params.format != "opus" or params.sample_rate != 16000 or params.channels != 1:
+            raise RuntimeError("unsupported uplink audio_params")
+        if params.frame_duration != 60:
+            log.warning("session.unexpected_frame_duration", value=params.frame_duration)
+        await self._queue_json(server_hello(self.session_id))
+        self.state.transition(SessionState.READY)
+        store = getattr(self.ws.app.state, "locations", None)
+        if store is not None:
+            try:
+                self.device_location = await store.get(self.device_id)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("session.location_load_failed", error=str(exc), session_id=self.session_id)
+        log.info(
+            "session.hello_ok",
+            session_id=self.session_id,
+            device_id=self.device_id,
+            client_ip=self.client_ip,
+            device_city=getattr(self.device_location, "city", None),
+            wifi_ssid=getattr(self.device_location, "ssid", None),
+        )
+
+    async def _discover_mcp(self) -> None:
+        try:
+            token = _bearer_token(self.authorization)
+            await self.mcp.initialize(
+                vision_url=self.settings.vision_url,
+                vision_token=token,
+            )
+            await self.mcp.list_tools()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("mcp.discover_failed", error=str(exc), session_id=self.session_id)
+            self.mcp.apply_english_catalog()
+        self.brain = self.brain_factory()
+        try:
+            await self.brain.configure_tools(self.router.gemini_tools(self.mcp))
+        except Exception as exc:  # noqa: BLE001
+            log.warning("brain.configure_failed", error=str(exc))
+        # Warm the Live socket now so the first wake is not a multi-second connect.
+        try:
+            await self.brain.ensure_connected()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("brain.preconnect_failed", error=str(exc), session_id=self.session_id)
+        # listen/start often arrives before MCP finishes; attach the brain now.
+        if self.state.state == SessionState.LISTENING and not self._brain_ready:
+            self._begin_task = asyncio.create_task(self._begin_brain(self.state.generation))
+            log.info("session.brain_attached", session_id=self.session_id)
+
+    async def _receive_loop(self) -> None:
+        while not self._closed:
+            message = await self.ws.receive()
+            self._last_rx = time.monotonic()
+            if message["type"] == "websocket.disconnect":
+                break
+            if message.get("text") is not None:
+                await self._on_json(message["text"])
+            elif message.get("bytes") is not None:
+                await self._on_binary(message["bytes"])
+
+    async def _on_json(self, raw: str) -> None:
+        try:
+            data = __import__("orjson").loads(raw)
+        except Exception:
+            log.warning("session.malformed_json")
+            return
+        if not isinstance(data, dict) or "type" not in data:
+            log.warning("session.missing_type")
+            return
+        msg_type = data["type"]
+        if msg_type == "listen":
+            try:
+                msg = ListenMessage.model_validate(data)
+            except ValidationError:
+                return
+            await self._on_listen(msg)
+        elif msg_type == "abort":
+            try:
+                msg = AbortMessage.model_validate(data)
+            except ValidationError:
+                return
+            await self._abort(reason=msg.reason)
+        elif msg_type == "mcp":
+            try:
+                msg = McpEnvelope.model_validate(data)
+            except ValidationError:
+                return
+            self.mcp.on_message(msg.payload)
+        else:
+            log.info("session.unknown_type", type=msg_type)
+
+    async def _on_listen(self, msg: ListenMessage) -> None:
+        if msg.state == "start":
+            self._listen_mode = msg.mode or "auto"
+            await self._start_listen()
+        elif msg.state == "stop":
+            await self._stop_listen()
+        elif msg.state == "detect":
+            await self._abort(reason="wake_word_detected")
+            await self._start_listen()
+
+    async def _start_listen(self) -> None:
+        await self._cancel_turn()
+        gen = self.state.bump_generation()
+        try:
+            self._set_state(SessionState.LISTENING)
+        except Exception:
+            self.state.state = SessionState.LISTENING
+            self._log_state(SessionState.LISTENING)
+        self.codec.reset()
+        self._utterance_bytes = 0
+        self._listen_started_at = time.monotonic()
+        self._pcm_started = False
+        self._forwarded_seconds = 0.0
+        self._forward_capped = False
+        self._pcm_debug.clear()
+        self._awaiting_tts_stop = False
+        # Reuse Silero LSTM across listens — a new scorer is cold for ~1s.
+        self._gate.reset(reset_scorer=False)
+        self._emotion = "happy"
+        self._brain_ready = False
+        self._pcm_hold.clear()
+        self._last_gate_key = None
+        self._uplink_ignored_logged = False
+        self._tts_played = False
+        self._pending_music = None
+        self._last_uplink = time.monotonic()
+        log.info("session.listen_start", generation=gen, session_id=self.session_id)
+        if self.brain:
+            self._begin_task = asyncio.create_task(self._begin_brain(gen))
+        else:
+            log.info("session.brain_pending", session_id=self.session_id)
+
+    async def _begin_brain(self, generation: int) -> None:
+        if not self.brain or generation != self.state.generation:
+            return
+        try:
+            await self.brain.begin_utterance()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("session.begin_failed", error=str(exc), session_id=self.session_id)
+            return
+        if generation != self.state.generation:
+            return
+        self._brain_ready = True
+        # Flush even if we already left LISTENING (hangover may have ended the turn).
+        await self._flush_pcm_hold()
+
+    async def _flush_pcm_hold(self) -> None:
+        if not self.brain or not self._brain_ready:
+            return
+        while self._pcm_hold:
+            chunk = self._pcm_hold.popleft()
+            if self._forwarded_seconds >= self.settings.max_forwarded_audio_seconds:
+                self._forward_capped = True
+                self._pcm_hold.clear()
+                return
+            await self.brain.push_pcm(chunk)
+            self._forwarded_seconds += _UPLINK_FRAME_SECONDS
+            self._pcm_started = True
+            AUDIO_GATE.labels(result="accepted").inc()
+
+    async def _await_brain_ready(self) -> None:
+        """Wait for background begin_utterance so held wake PCM is flushed before end."""
+        if (
+            self.brain
+            and not self._brain_ready
+            and (self._begin_task is None or self._begin_task.done())
+        ):
+            self._begin_task = asyncio.create_task(self._begin_brain(self.state.generation))
+        task = self._begin_task
+        if task is not None and not task.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=8.0)
+            except (TimeoutError, asyncio.TimeoutError, asyncio.CancelledError, Exception):
+                pass
+        elif self._brain_ready:
+            await self._flush_pcm_hold()
+
+    def _log_gate(self, *, decision: str, reason: str, emitted: int) -> None:
+        key = (decision, reason)
+        changed = key != self._last_gate_key
+        self._last_gate_key = key
+        payload = {
+            "decision": decision,
+            "reason": reason,
+            "rms": round(self._gate.last_rms, 1),
+            "speech_prob": round(self._gate.last_prob, 3),
+            "threshold": round(self._gate.last_threshold, 3),
+            "emitted": emitted,
+            "session_id": self.session_id,
+        }
+        if changed:
+            log.info("session.gate", **payload)
+        else:
+            log.debug("session.gate", **payload)
+
+    def _log_uplink_ignored(self, reason: str) -> None:
+        FRAMES_DROPPED.labels(direction="uplink").inc()
+        if not self._uplink_ignored_logged:
+            self._uplink_ignored_logged = True
+            log.info(
+                "session.uplink_ignored",
+                reason=reason,
+                state=self.state.state.value,
+                session_id=self.session_id,
+            )
+        else:
+            log.debug(
+                "session.uplink_ignored",
+                reason=reason,
+                state=self.state.state.value,
+                session_id=self.session_id,
+            )
+
+    async def _forward_chunk(self, chunk: bytes) -> bool:
+        """Forward one gated PCM frame, or hold it until Gemini is ready.
+
+        Returns False if the utterance was ended (forward cap).
+        """
+        if self._forwarded_seconds >= self.settings.max_forwarded_audio_seconds:
+            self._forward_capped = True
+            log.info(
+                "session.forward_capped",
+                session_id=self.session_id,
+                forwarded_s=round(self._forwarded_seconds, 2),
+            )
+            AUDIO_GATE.labels(result="dropped").inc()
+            await self._end_utterance_now("forward_capped")
+            return False
+        if self.brain and self._brain_ready:
+            await self.brain.push_pcm(chunk)
+            self._forwarded_seconds += _UPLINK_FRAME_SECONDS
+            self._pcm_started = True
+            AUDIO_GATE.labels(result="accepted").inc()
+            return True
+        # Brain not ready yet — keep gated speech so wake audio is not lost.
+        self._pcm_hold.append(chunk)
+        self._pcm_started = True
+        AUDIO_GATE.labels(result="accepted").inc()
+        if not self._uplink_ignored_logged:
+            # Reuse first-drop flag only for not_listening; brain hold is expected.
+            log.debug(
+                "session.pcm_held",
+                held=len(self._pcm_hold),
+                session_id=self.session_id,
+            )
+        return True
+
+    async def _on_binary(self, packet: bytes) -> None:
+        if self.state.state != SessionState.LISTENING:
+            self._log_uplink_ignored("not_listening")
+            return
+        if time.monotonic() - self._listen_started_at > self.settings.max_utterance_seconds:
+            await self._end_utterance_now("max_utterance")
+            return
+        if self._utterance_bytes + len(packet) > self.settings.max_utterance_bytes:
+            await self._end_utterance_now("max_utterance_bytes")
+            return
+        self._utterance_bytes += len(packet)
+        self._last_uplink = time.monotonic()
+        try:
+            pcm = self.codec.decode_uplink(packet)
+        except CodecError:
+            FRAMES_DROPPED.labels(direction="uplink").inc()
+            log.info("session.uplink_decode_failed", session_id=self.session_id)
+            return
+
+        if pcm:
+            self._pcm_debug.extend(pcm)
+
+        if self._forward_capped:
+            AUDIO_GATE.labels(result="dropped").inc()
+            self._log_gate(decision="DROPPED", reason="capped", emitted=0)
+            return
+
+        emitted = self._gate.process(pcm)
+        self._log_gate(
+            decision=self._gate.last_decision,
+            reason=self._gate.last_reason,
+            emitted=len(emitted),
+        )
+        if not emitted:
+            AUDIO_GATE.labels(result="dropped").inc()
+            if self._gate.ever_opened and self._gate.last_reason == "hangover_expired":
+                await self._end_utterance_now("hangover_expired")
+            return
+
+        for chunk in emitted:
+            if not await self._forward_chunk(chunk):
+                return
+
+    def _save_debug_wav(self) -> None:
+        pcm = bytes(self._pcm_debug)
+        try:
+            wav_bytes = _pcm16le_mono_to_wav_bytes(pcm)
+            _DEBUG_WAV.write_bytes(wav_bytes)
+            duration_s = (len(pcm) / 2) / 16000 if pcm else 0.0
+            log.info(
+                "session.debug_wav",
+                path=str(_DEBUG_WAV.resolve()),
+                pcm_bytes=len(pcm),
+                wav_bytes=len(wav_bytes),
+                duration_s=round(duration_s, 2),
+                gate_accepted=self._gate.accepted_chunks,
+                gate_dropped=self._gate.dropped_chunks,
+                gate_opened=self._gate.ever_opened,
+                last_prob=round(self._gate.last_prob, 3),
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("session.debug_wav_failed", error=str(exc))
+
+    async def _end_utterance_now(self, reason: str) -> None:
+        """End the Gemini turn without waiting for client listen/stop.
+
+        Xiaozhi leaves listening on tts/start, so we send that immediately to
+        stop the ESP32 from streaming leftover static.
+        """
+        if self.state.state != SessionState.LISTENING:
+            return
+        log.info(
+            "session.endpoint",
+            reason=reason,
+            session_id=self.session_id,
+            accepted=self._gate.accepted_chunks,
+            forwarded_s=round(self._forwarded_seconds, 2),
+        )
+        # Spec: device streams Opus until listen/stop, abort, or tts/start.
+        await self._queue_json(tts(self.session_id, "start"))
+        self._awaiting_tts_stop = True
+        await self._stop_listen()
+
+    async def _release_listening_interrupt(self, generation: int | None = None) -> None:
+        """Send tts/stop so the ESP32 leaves Speaking even when there is no audio.
+
+        Uses the current generation so abort/cancel cannot drop the stop frame.
+        """
+        if not self._awaiting_tts_stop:
+            return
+        self._awaiting_tts_stop = False
+        await self._queue_json(tts(self.session_id, "stop"))
+
+    async def _stop_listen(self) -> None:
+        if self.state.state != SessionState.LISTENING:
+            return
+        await self._await_brain_ready()
+        self._save_debug_wav()
+        self._set_state(SessionState.THINKING)
+        generation = self.state.generation
+        self._turn_task = asyncio.create_task(self._run_turn(generation))
+
+    async def _execute_turn(self, generation: int) -> None:
+        speak_task: asyncio.Task | None = None
+        if generation != self.state.generation:
+            return
+
+        if not self._pcm_started or not self._gate.ever_opened:
+            log.info(
+                "session.silence",
+                session_id=self.session_id,
+                reason="vad_no_speech",
+                dropped=self._gate.dropped_chunks,
+                accepted=self._gate.accepted_chunks,
+                last_prob=round(self._gate.last_prob, 3),
+                last_rms=round(self._gate.last_rms, 1),
+                last_decision=self._gate.last_decision,
+                last_reason=self._gate.last_reason,
+                pcm_debug_bytes=len(self._pcm_debug),
+            )
+            if self.brain:
+                await self.brain.cancel()
+                await self.brain.finish_speakable()
+            await self._release_listening_interrupt(generation)
+            TURNS.labels(result="ok").inc()
+            await self._maybe_close_after_chat()
+            return
+
+        if not self.brain:
+            await self._speak(FALLBACK_BURMESE, generation, emotion="sad")
+            return
+
+        speak_task = asyncio.create_task(self._consume_speakable(generation))
+        try:
+            t0 = time.monotonic()
+            result = await self.brain.end_utterance()
+            STAGE_LATENCY.labels(stage="gemini").observe(time.monotonic() - t0)
+            log.info(
+                "session.gemini_raw",
+                session_id=self.session_id,
+                gemini_input=result.input_text,
+                gemini_output=result.output_text,
+                gemini_error=result.error,
+                transient=result.transient_disconnect,
+                function_calls=[c.name for c in result.function_calls],
+            )
+            if generation != self.state.generation:
+                return
+
+            if result.transient_disconnect or (
+                result.error and is_transient_gemini_error(result.error)
+            ):
+                log.info("session.gemini_reconnecting", session_id=self.session_id)
+                await self.brain.finish_speakable()
+                await speak_task
+                await self._release_listening_interrupt(generation)
+                TURNS.labels(result="ok").inc()
+                return
+
+            user_text = " ".join((result.input_text or "").split()).strip()
+            if user_text:
+                await self._queue_json(stt(self.session_id, user_text), generation)
+                if self._is_farewell(user_text):
+                    await self._request_exit()
+
+            self._inject_music_play(result, user_text)
+            if result.function_calls:
+                try:
+                    result = await asyncio.wait_for(
+                        self._handle_tools(result, generation, depth=0),
+                        timeout=max(20.0, self.settings.mcp_timeout_s + 12.0),
+                    )
+                except TimeoutError:
+                    log.warning("session.tools_timeout", session_id=self.session_id)
+                    result = TurnResult(input_text=result.input_text, error="tools timeout")
+            if generation != self.state.generation:
+                return
+
+            if result.transient_disconnect or (
+                result.error and is_transient_gemini_error(result.error)
+            ):
+                log.info("session.gemini_reconnecting", session_id=self.session_id)
+                await self.brain.finish_speakable()
+                await speak_task
+                TURNS.labels(result="ok").inc()
+                return
+
+            text = sanitize_for_tts(
+                cap_text((result.output_text or "").strip(), self.settings.max_tts_chars)
+            )
+            log.info(
+                "session.tts_sanitized",
+                session_id=self.session_id,
+                gemini_output=result.output_text,
+                tts_string=text,
+                gemini_error=result.error,
+            )
+            if result.error:
+                self._emotion = "sad"
+                await self.brain.enqueue_speakable(FALLBACK_BURMESE)
+            elif not text and not self._tts_played:
+                log.info("session.silence", session_id=self.session_id, reason="llm_empty")
+                await self.brain.finish_speakable()
+                await speak_task
+                TURNS.labels(result="ok").inc()
+                await self._maybe_close_after_chat()
+                return
+
+            await self.brain.finish_speakable()
+            await speak_task
+            TURNS.labels(result="ok").inc()
+        finally:
+            if speak_task is not None and not speak_task.done():
+                if self.brain:
+                    try:
+                        await self.brain.finish_speakable()
+                    except Exception:  # noqa: BLE001
+                        pass
+                speak_task.cancel()
+                try:
+                    await speak_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+
+    async def _run_turn(self, generation: int) -> None:
+        started = time.monotonic()
+        try:
+            await asyncio.wait_for(
+                self._execute_turn(generation),
+                timeout=self.settings.turn_timeout_s,
+            )
+        except TimeoutError:
+            log.warning("session.turn_timeout", session_id=self.session_id, generation=generation)
+            TURNS.labels(result="error").inc()
+            if self.brain:
+                await self.brain.cancel()
+                try:
+                    await self.brain.finish_speakable()
+                except Exception:  # noqa: BLE001
+                    pass
+            await self._release_listening_interrupt(generation)
+        except asyncio.CancelledError:
+            TURNS.labels(result="cancelled").inc()
+            raise
+        except Exception as exc:  # noqa: BLE001
+            log.warning("session.turn_failed", error=str(exc), session_id=self.session_id)
+            TURNS.labels(result="error").inc()
+            if generation == self.state.generation and not self._tts_played:
+                await self._speak(FALLBACK_BURMESE, generation, emotion="sad")
+        finally:
+            TURN_LATENCY.observe(time.monotonic() - started)
+            try:
+                if generation == self.state.generation:
+                    await self._play_pending_music(generation)
+            except asyncio.CancelledError:
+                log.warning(
+                    "session.music_cancelled",
+                    session_id=self.session_id,
+                    generation=generation,
+                )
+            await self._release_listening_interrupt()
+            if generation == self.state.generation and self.state.state != SessionState.CLOSED:
+                self._set_state(SessionState.READY, force=True)
+            await self._maybe_close_after_chat()
+
+    async def _handle_tools(
+        self,
+        result: TurnResult,
+        generation: int,
+        *,
+        depth: int = 0,
+    ) -> TurnResult:
+        assert self.brain
+        if depth >= self.settings.max_tool_rounds:
+            log.warning("session.tools_max_rounds", session_id=self.session_id, depth=depth)
+            return TurnResult(input_text=result.input_text, error="too many tool rounds")
+        calls = result.function_calls
+        user_text = " ".join((result.input_text or "").split()).strip()
+        responses: list[dict[str, Any]] = []
+        device_moving: bool | None = None
+        for call in calls:
+            if generation != self.state.generation:
+                return result
+            tool_name = canonical_tool_name(call.name)
+            if tool_name in OTTO_MOTION_TOOLS:
+                if tool_name == "self.otto.stop" and not looks_like_noise_utterance(user_text):
+                    # Only probe status when STT is non-empty but stop-intent is unclear.
+                    if device_moving is None and not should_dispatch_otto_tool(
+                        tool_name, user_text, device_moving=False
+                    ):
+                        device_moving = await self._otto_is_moving()
+                if not should_dispatch_otto_tool(
+                    tool_name, user_text, device_moving=device_moving
+                ):
+                    log.info(
+                        "session.otto_gated",
+                        session_id=self.session_id,
+                        name=tool_name,
+                        user_text=user_text or None,
+                        reason="empty_or_no_intent",
+                    )
+                    payload = {
+                        "ok": False,
+                        "skipped": True,
+                        "reason": "otto_gated",
+                        "note": "Ignored: no clear stop/motion request in user speech.",
+                    }
+                    responses.append(
+                        {
+                            "name": call.name,
+                            "call_id": call.call_id,
+                            "response": self.router.as_function_response(payload),
+                        }
+                    )
+                    continue
+            payload = await self.router.dispatch(
+                tool_name,
+                call.arguments,
+                self.mcp,
+                self._set_emotion,
+                on_exit=self._request_exit,
+                context=self._tool_context(user_text=result.input_text),
+            )
+            if tool_name == "search_music":
+                self._queue_music(payload)
+                payload = music_payload_for_llm(payload)
+            log.info(
+                "session.tool_dispatch",
+                session_id=self.session_id,
+                name=tool_name,
+                call_id=call.call_id,
+                ok="error" not in payload,
+                playback=payload.get("playback"),
+            )
+            responses.append(
+                {
+                    "name": call.name,
+                    "call_id": call.call_id,
+                    "response": self.router.as_function_response(payload),
+                }
+            )
+        continued = await self.brain.continue_with_functions(responses)
+        if continued.function_calls and generation == self.state.generation:
+            return await self._handle_tools(continued, generation, depth=depth + 1)
+        continued.input_text = continued.input_text or result.input_text
+        return continued
+
+    async def _otto_is_moving(self) -> bool:
+        """Best-effort read of self.otto.get_status for stop gating."""
+        if not self.mcp or "self.otto.get_status" not in self.mcp.tool_by_name:
+            return False
+        try:
+            text = await self.mcp.call("self.otto.get_status", {})
+            return parse_otto_moving(text)
+        except (McpError, Exception) as exc:  # noqa: BLE001
+            log.info("session.otto_status_failed", session_id=self.session_id, error=str(exc))
+            return False
+
+    async def _set_emotion(self, emotion: str) -> None:
+        self._emotion = emotion if emotion in KNOWN_EMOTIONS else "neutral"
+
+    async def _consume_speakable(self, generation: int) -> None:
+        """Speak Gemini sentences as they are published — do not wait for the full turn."""
+        started = False
+        t0 = time.monotonic()
+        try:
+            async for sentence in self.brain.iter_speakable():
+                if generation != self.state.generation:
+                    return
+                sentence = sanitize_for_tts(sentence)
+                if not sentence:
+                    continue
+                if not started:
+                    already_started = self._awaiting_tts_stop
+                    self._awaiting_tts_stop = False
+                    self._set_state(SessionState.SPEAKING, force=True)
+                    await self._queue_json(llm_emotion(self.session_id, self._emotion), generation)
+                    if not already_started:
+                        await self._queue_json(tts(self.session_id, "start"), generation)
+                    started = True
+                    log.info(
+                        "session.tts_first_sentence",
+                        session_id=self.session_id,
+                        tts_string=sentence,
+                        wait_s=round(time.monotonic() - t0, 3),
+                    )
+                await self._queue_json(tts(self.session_id, "sentence_start", sentence), generation)
+                log.info(
+                    "session.tts_sentence",
+                    session_id=self.session_id,
+                    tts_string=sentence,
+                )
+                await self._stream_sentence(sentence, generation)
+                self._tts_played = True
+        except (TtsError, CodecError) as exc:
+            log.warning("session.tts_failed", error=str(exc))
+            await self._alert_tts_failed(generation)
+        finally:
+            STAGE_LATENCY.labels(stage="tts").observe(time.monotonic() - t0)
+            if started and generation == self.state.generation:
+                if self._pending_music is not None:
+                    # Keep the Xiaozhi speaking window open for the music stream.
+                    self._awaiting_tts_stop = True
+                    return
+                await self._queue_json(tts(self.session_id, "stop"), generation)
+
+    async def _speak(self, text: str, generation: int, emotion: str = "happy") -> None:
+        if generation != self.state.generation:
+            return
+        text = sanitize_for_tts(text)
+        log.info(
+            "session.tts_handoff",
+            session_id=self.session_id,
+            tts_string=text,
+            emotion=emotion,
+        )
+        chunks = chunk_burmese(text) if text else []
+        if not text or not chunks:
+            log.info("session.tts_skip_empty", session_id=self.session_id)
+            await self._release_listening_interrupt(generation)
+            return
+
+        already_started = self._awaiting_tts_stop
+        self._awaiting_tts_stop = False
+        self._set_state(SessionState.SPEAKING, force=True)
+        await self._queue_json(llm_emotion(self.session_id, emotion), generation)
+        if not already_started:
+            await self._queue_json(tts(self.session_id, "start"), generation)
+
+        t0 = time.monotonic()
+        try:
+            for sentence in chunks:
+                if generation != self.state.generation:
+                    return
+                await self._queue_json(tts(self.session_id, "sentence_start", sentence), generation)
+                log.info(
+                    "session.tts_sentence",
+                    session_id=self.session_id,
+                    tts_string=sentence,
+                )
+                await self._stream_sentence(sentence, generation)
+                self._tts_played = True
+        except (TtsError, CodecError) as exc:
+            log.warning("session.tts_failed", error=str(exc))
+            await self._alert_tts_failed(generation)
+        finally:
+            STAGE_LATENCY.labels(stage="tts").observe(time.monotonic() - t0)
+            if generation == self.state.generation:
+                if self._pending_music is not None:
+                    self._awaiting_tts_stop = True
+                    return
+                await self._queue_json(tts(self.session_id, "stop"), generation)
+
+    async def _stream_sentence(self, sentence: str, generation: int) -> None:
+        await pace_opus_stream(
+            self._opus_packets_for_sentence(sentence),
+            lambda packet: self._queue_bytes(packet, generation),
+            should_continue=lambda: generation == self.state.generation and not self._closed,
+        )
+
+    async def _opus_packets_for_sentence(self, sentence: str):
+        async for frame in self._pcm_frames_for_sentence(sentence):
+            yield self.codec.encode_downlink(frame)
+
+    async def _pcm_frames_for_sentence(self, sentence: str):
+        timeout_s = self.settings.tts_timeout_s
+        iter_mp3 = getattr(self.tts_client, "iter_mp3", None)
+        if callable(iter_mp3):
+            async for frame in iter_pcm_frames_from_mp3(iter_mp3(sentence), timeout_s=timeout_s):
+                yield frame
+            return
+        mp3 = await self.tts_client.synthesize(sentence)
+        pcm = await mp3_to_pcm24k(mp3, timeout_s=timeout_s)
+        for frame in iter_pcm_frames(pcm):
+            yield frame
+
+    async def _pace_downlink(self, pcm: bytes, generation: int) -> None:
+        packets = [self.codec.encode_downlink(frame) for frame in iter_pcm_frames(pcm)]
+        await pace_opus_frames(
+            packets,
+            lambda packet: self._queue_bytes(packet, generation),
+            should_continue=lambda: generation == self.state.generation and not self._closed,
+        )
+
+    def _inject_music_play(self, result: TurnResult, user_text: str) -> None:
+        if not user_text or not is_music_play_request(user_text):
+            return
+        if any(call.name == "search_music" for call in result.function_calls):
+            return
+        query = music_search_query(user_text)
+        result.function_calls.append(
+            FunctionCall(
+                name="search_music",
+                arguments={"query": query, "play": True},
+                call_id="music-intent",
+            )
+        )
+        log.info(
+            "session.music_intent",
+            session_id=self.session_id,
+            query=query,
+            user_text=user_text,
+        )
+
+    def _queue_music(self, payload: dict[str, Any]) -> None:
+        if payload.get("error") or payload.get("playback") != "queued":
+            return
+        url = str(payload.get("stream_url") or "").strip()
+        if not url:
+            return
+        device = device_music_call(self.mcp.tool_by_name, payload)
+        self._pending_music = PendingMusic(
+            track=str(payload.get("track") or "song").strip() or "song",
+            artist=str(payload.get("artist") or "").strip(),
+            stream_url=url,
+            source=str(payload.get("source") or "catalog"),
+            preview=bool(payload.get("preview")),
+            device_tool=device[0] if device else None,
+            device_args=device[1] if device else None,
+        )
+        log.info(
+            "session.music_queued",
+            session_id=self.session_id,
+            track=self._pending_music.track,
+            artist=self._pending_music.artist,
+            source=self._pending_music.source,
+            device_tool=self._pending_music.device_tool,
+        )
+
+    async def _play_pending_music(self, generation: int) -> None:
+        clip = self._pending_music
+        self._pending_music = None
+        if clip is None or generation != self.state.generation or self._closed:
+            return
+        if clip.device_tool:
+            status = "completed"
+            try:
+                text = await self.mcp.call(clip.device_tool, clip.device_args or {})
+                log.info(
+                    "session.music_device",
+                    session_id=self.session_id,
+                    tool=clip.device_tool,
+                    result=text,
+                )
+            except (McpError, ValueError) as exc:
+                log.warning("session.music_device_failed", error=str(exc), tool=clip.device_tool)
+                status = "failed"
+            await self._notify_music_finished(clip, status, generation)
+            return
+
+        already_started = self._awaiting_tts_stop or self.state.state == SessionState.SPEAKING
+        self._awaiting_tts_stop = False
+        self._set_state(SessionState.SPEAKING, force=True)
+        await self._queue_json(llm_emotion(self.session_id, "happy"), generation)
+        if not already_started:
+            await self._queue_json(tts(self.session_id, "start"), generation)
+        label = clip.track if not clip.artist else f"{clip.track} — {clip.artist}"
+        await self._queue_json(tts(self.session_id, "sentence_start", label), generation)
+        status = "failed"
+        try:
+            await self._stream_music_url(clip.stream_url, generation, source=clip.source)
+            self._tts_played = True
+            status = "completed"
+            log.info(
+                "session.music_played",
+                session_id=self.session_id,
+                track=clip.track,
+                source=clip.source,
+                preview=clip.preview,
+            )
+        except asyncio.CancelledError:
+            log.warning(
+                "session.music_cancelled",
+                session_id=self.session_id,
+                track=clip.track,
+                url=clip.stream_url,
+            )
+            raise
+        except (CodecError, HttpGuardError, httpx.HTTPError, Exception) as exc:  # noqa: BLE001
+            log.warning(
+                "session.music_failed",
+                error=str(exc),
+                error_type=type(exc).__name__,
+                url=clip.stream_url,
+                track=clip.track,
+                source=clip.source,
+            )
+        if generation == self.state.generation:
+            await self._notify_music_finished(clip, status, generation)
+        if generation == self.state.generation:
+            self._awaiting_tts_stop = True
+
+    async def _notify_music_finished(self, clip: PendingMusic, status: str, generation: int) -> None:
+        if self.brain is None or generation != self.state.generation or self._closed:
+            return
+        notify = getattr(self.brain, "notify_music_finished", None)
+        if not callable(notify):
+            return
+        try:
+            result = await notify(
+                track=clip.track,
+                artist=clip.artist,
+                status=status,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("session.music_notify_failed", error=str(exc), track=clip.track)
+            return
+        if generation != self.state.generation:
+            return
+        text = sanitize_for_tts(
+            cap_text((result.output_text or "").strip(), self.settings.max_tts_chars)
+        )
+        if not text:
+            return
+        self._awaiting_tts_stop = True
+        await self._speak(text, generation, emotion="happy")
+
+    async def _stream_music_url(self, url: str, generation: int, *, source: str = "") -> None:
+        started = time.monotonic()
+        frames = 0
+
+        async def packets() -> AsyncIterator[bytes]:
+            nonlocal frames
+            async for frame in self._pcm_frames_for_music(url, source=source):
+                if frames == 0:
+                    log.info(
+                        "session.music_first_frame",
+                        session_id=self.session_id,
+                        wait_s=round(time.monotonic() - started, 3),
+                        url=url,
+                    )
+                frames += 1
+                if frames == 1 or frames % 100 == 0:
+                    log.info(
+                        "session.music_frames",
+                        session_id=self.session_id,
+                        frames=frames,
+                        elapsed_s=round(time.monotonic() - started, 3),
+                    )
+                yield self.codec.encode_downlink(frame)
+
+        await pace_opus_stream(
+            packets(),
+            lambda packet: self._queue_bytes(packet, generation),
+            should_continue=lambda: generation == self.state.generation and not self._closed,
+        )
+        if frames == 0:
+            raise CodecError("music stream produced no frames")
+        log.info(
+            "session.music_stream_done",
+            session_id=self.session_id,
+            frames=frames,
+            elapsed_s=round(time.monotonic() - started, 3),
+            url=url,
+        )
+
+    async def _pcm_frames_for_music(
+        self, url: str, *, source: str = ""
+    ) -> AsyncIterator[bytes]:
+        local_path = self._local_music_path(url, source=source)
+        if local_path is not None:
+            log.info(
+                "session.music_local_file",
+                session_id=self.session_id,
+                path=str(local_path),
+            )
+            async for frame in iter_pcm_frames_from_file(
+                local_path,
+                timeout_s=8.0,
+                first_frame_timeout_s=15.0,
+                max_seconds=None,
+            ):
+                yield frame
+            return
+        if is_youtube_playback(url, source):
+            assert_public_https(url)
+            cmd = ytdlp_stream_cmd(url, self.settings)
+            log.info(
+                "session.music_ytdlp_pipe",
+                session_id=self.session_id,
+                url=url,
+                bin=cmd[0],
+            )
+            async for frame in iter_pcm_frames_from_subprocess(
+                cmd,
+                timeout_s=self.settings.music_download_timeout_s,
+                first_frame_timeout_s=max(20.0, self.settings.music_ytdlp_timeout_s),
+                max_seconds=self._music_max_seconds(),
+            ):
+                yield frame
+            return
+        assert_public_https(url)
+        client = getattr(self.ws.app.state, "http", None)
+        if client is None:
+            raise CodecError("HTTP client is not available")
+        timeout = httpx.Timeout(
+            connect=min(10.0, self.settings.music_download_timeout_s),
+            read=self.settings.music_download_timeout_s,
+            write=10.0,
+            pool=10.0,
+        )
+        started = time.monotonic()
+        log.info("session.music_download_start", session_id=self.session_id, url=url)
+        try:
+            async with client.stream(
+                "GET",
+                url,
+                timeout=timeout,
+                follow_redirects=True,
+                headers={"Accept": "audio/*,*/*;q=0.8"},
+            ) as response:
+                content_type = response.headers.get("content-type", "")
+                log.info(
+                    "session.music_http",
+                    session_id=self.session_id,
+                    status=response.status_code,
+                    content_type=content_type or None,
+                    content_length=response.headers.get("content-length"),
+                    final_url=str(response.url),
+                )
+                response.raise_for_status()
+                body = response.aiter_bytes(64 * 1024)
+                first = await anext(body, b"")
+                if not first:
+                    raise CodecError("empty music stream")
+                max_bytes = self.settings.music_max_bytes
+
+                async def chunks() -> AsyncIterator[bytes]:
+                    total = len(first)
+                    yield first
+                    async for chunk in body:
+                        if not chunk:
+                            continue
+                        total += len(chunk)
+                        if total > max_bytes:
+                            log.warning(
+                                "session.music_truncated",
+                                session_id=self.session_id,
+                                bytes=total,
+                                limit=max_bytes,
+                            )
+                            return
+                        yield chunk
+                    log.info(
+                        "session.music_http_eof",
+                        session_id=self.session_id,
+                        bytes=total,
+                        elapsed_s=round(time.monotonic() - started, 3),
+                    )
+
+                input_format = _ffmpeg_input_format(content_type, first)
+                if _music_stream_pipe_friendly(content_type, first):
+                    log.info(
+                        "session.music_decode",
+                        session_id=self.session_id,
+                        mode="pipe",
+                        content_type=content_type or None,
+                        input_format=input_format,
+                        head_bytes=len(first),
+                    )
+                    async for frame in iter_pcm_frames_from_audio_stream(
+                        chunks(),
+                        timeout_s=8.0,
+                        first_frame_timeout_s=15.0,
+                        max_seconds=self._music_max_seconds(),
+                        input_format=input_format,
+                    ):
+                        yield frame
+                    return
+
+                log.info(
+                    "session.music_decode",
+                    session_id=self.session_id,
+                    mode="buffer",
+                    content_type=content_type or None,
+                    head_bytes=len(first),
+                )
+                audio = await self._buffer_audio(chunks())
+                cap = self._music_max_seconds()
+                decode_timeout = self.settings.tts_timeout_s
+                if cap is not None:
+                    decode_timeout = max(decode_timeout, cap)
+                pcm = await media_to_pcm24k(
+                    audio,
+                    timeout_s=decode_timeout,
+                    max_seconds=cap,
+                )
+                for frame in iter_pcm_frames(pcm):
+                    yield frame
+        except asyncio.CancelledError:
+            log.info("session.music_http_cancelled", session_id=self.session_id, url=url)
+            raise
+        except (CodecError, HttpGuardError):
+            raise
+        except httpx.HTTPStatusError as exc:
+            raise CodecError(f"music HTTP {exc.response.status_code}") from exc
+        except httpx.TimeoutException as exc:
+            raise CodecError(f"music HTTP timeout: {exc}") from exc
+        except Exception as exc:
+            log.warning(
+                "session.music_http_failed",
+                session_id=self.session_id,
+                error=str(exc),
+                error_type=type(exc).__name__,
+                url=url,
+                elapsed_s=round(time.monotonic() - started, 3),
+            )
+            raise
+
+    def _music_max_seconds(self) -> float | None:
+        """None means play to the end (MUSIC_MAX_SECONDS <= 0)."""
+        cap = float(self.settings.music_max_seconds)
+        if cap <= 0:
+            return None
+        return cap
+
+    def _local_music_path(self, url: str, *, source: str = "") -> Path | None:
+        if source != "local" and not Path(url).is_absolute():
+            return None
+        root = music_local_root(self.settings.music_local_dir)
+        if root is None:
+            return None
+        return resolve_local_music_path(root, url)
+
+    async def _buffer_audio(self, chunks: AsyncIterator[bytes]) -> bytes:
+        parts: list[bytes] = []
+        total = 0
+        async for chunk in chunks:
+            if not chunk:
+                continue
+            parts.append(chunk)
+            total += len(chunk)
+            if total >= 256_000 and (total // 65536) % 4 == 0:
+                log.info("session.music_buffering", session_id=self.session_id, bytes=total)
+        if not parts:
+            raise CodecError("empty music stream")
+        return b"".join(parts)
+
+    async def _abort(self, reason: str | None = None) -> None:
+        log.info("session.abort", reason=reason, session_id=self.session_id)
+        needs_stop = self._awaiting_tts_stop or self.state.state == SessionState.SPEAKING
+        await self._cancel_turn()
+        if needs_stop:
+            self._awaiting_tts_stop = False
+            await self._queue_json(tts(self.session_id, "stop"))
+        if self.state.state != SessionState.CLOSED:
+            self._set_state(SessionState.READY, force=True)
+
+    async def _cancel_turn(self) -> None:
+        self.state.bump_generation()
+        self._pending_music = None
+        self._brain_ready = False
+        self._pcm_hold.clear()
+        if self._begin_task and not self._begin_task.done():
+            self._begin_task.cancel()
+            try:
+                await self._begin_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        self._begin_task = None
+        if self.brain:
+            await self.brain.cancel()
+        if self._turn_task and not self._turn_task.done():
+            if self._turn_task is asyncio.current_task():
+                # close() may run from inside the active turn; do not await ourselves.
+                pass
+            else:
+                self._turn_task.cancel()
+                try:
+                    await self._turn_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+                self._turn_task = None
+        while True:
+            try:
+                self.out_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+
+    async def _queue_json(self, payload: str, generation: int | None = None) -> None:
+        gen = self.state.generation if generation is None else generation
+        await self._put(Outbound("json", payload, gen))
+
+    async def _queue_bytes(self, payload: bytes, generation: int) -> None:
+        await self._put(Outbound("bytes", payload, generation))
+
+    async def _put(self, item: Outbound) -> None:
+        if self._closed:
+            return
+        await self.out_queue.put(item)
+
+    async def _writer_loop(self) -> None:
+        while True:
+            item = await self.out_queue.get()
+            QUEUE_DEPTH.labels(queue="outbound").set(self.out_queue.qsize())
+            if item is None:
+                return
+            if item.generation != self.state.generation:
+                continue
+            try:
+                if item.kind == "bytes":
+                    await self.ws.send_bytes(item.payload)  # type: ignore[arg-type]
+                else:
+                    await self.ws.send_text(item.payload)  # type: ignore[arg-type]
+            except Exception:
+                return
+
+    async def _keepalive_loop(self) -> None:
+        interval = self.settings.keepalive_interval_s
+        idle_limit = self.settings.device_idle_timeout_s
+        try:
+            while not self._closed:
+                await asyncio.sleep(interval)
+                if (
+                    self.state.state == SessionState.LISTENING
+                    and self._last_uplink > 0
+                    and time.monotonic() - self._last_uplink > self.settings.listen_idle_timeout_s
+                ):
+                    log.info("session.listen_idle", session_id=self.session_id)
+                    await self._end_utterance_now("listen_idle")
+                if self.ws.client_state != WebSocketState.CONNECTED:
+                    log.info("session.socket_gone", session_id=self.session_id)
+                    await self.close()
+                    return
+                idle_s = time.monotonic() - self._last_rx
+                if idle_s > idle_limit:
+                    if self.state.state in {SessionState.THINKING, SessionState.SPEAKING}:
+                        # Device is silent while we play TTS/music; do not kill the stream.
+                        pass
+                    else:
+                        log.info(
+                            "session.idle_timeout",
+                            session_id=self.session_id,
+                            state=self.state.state.value,
+                            idle_s=round(idle_s, 1),
+                        )
+                        await self.close()
+                        return
+                await self._queue_json(keepalive(self.session_id))
+        except asyncio.CancelledError:
+            return
+
+
+    async def _alert_tts_failed(self, generation: int) -> None:
+        if generation != self.state.generation:
+            return
+        await self._queue_json(
+            alert(self.session_id, "Warning", "Speech playback failed", "sad"),
+            generation,
+        )
+
+
+class SessionManager:
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+        self._by_device: dict[str, DeviceSession] = {}
+        self._lock = asyncio.Lock()
+
+    async def attach(self, session: DeviceSession) -> None:
+        async with self._lock:
+            previous = self._by_device.get(session.device_id)
+            if previous is None and len(self._by_device) >= self.settings.max_concurrent_sessions:
+                raise RuntimeError("too many sessions")
+            self._by_device[session.device_id] = session
+        if previous and previous is not session:
+            await previous.close()
+
+    async def detach(self, session: DeviceSession) -> None:
+        async with self._lock:
+            if self._by_device.get(session.device_id) is session:
+                self._by_device.pop(session.device_id, None)
+
+    def count(self) -> int:
+        return len(self._by_device)
+
+
+def _bearer_token(authorization: str | None) -> str | None:
+    if not authorization:
+        return None
+    value = authorization.strip()
+    prefix = "bearer "
+    if value.lower().startswith(prefix):
+        return value[len(prefix) :].strip()
+    if " " not in value:
+        return value
+    return None

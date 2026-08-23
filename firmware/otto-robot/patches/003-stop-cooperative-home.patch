@@ -1,0 +1,67 @@
+--- a/main/boards/otto-robot/otto_controller.cc
++++ b/main/boards/otto-robot/otto_controller.cc
+@@ -40,6 +40,7 @@ class OttoController {
+     QueueHandle_t action_queue_;
+     TaskHandle_t action_task_handle_ = nullptr;
+     bool is_action_in_progress_ = false;
++    volatile bool stop_requested_ = false;
+     bool has_hands_ = false;
+ 
+     // ... existing members ...
+@@ -77,6 +78,7 @@ class OttoController {
+     static void ActionTask(void* arg) {
+         OttoController* controller = static_cast<OttoController*>(arg);
+         OttoActionParams params;
++        // Attach only once for the life of this task; Attach() is now a no-op hold refresh if already attached.
+         controller->otto_.AttachServos();
+ 
+         while (true) {
+@@ -83,6 +85,14 @@ class OttoController {
+             if (xQueueReceive(controller->action_queue_, &params, pdMS_TO_TICKS(1000)) == pdTRUE) {
+                 ESP_LOGI(TAG, "执行动作: %d", params.action_type);
+                 PowerManager::PauseBatteryUpdate();
+                 controller->is_action_in_progress_ = true;
++                if (controller->stop_requested_ && params.action_type != ACTION_HOME) {
++                    // Drop non-home work queued before stop; still run HOME.
++                    controller->is_action_in_progress_ = false;
++                    PowerManager::ResumeBatteryUpdate();
++                    continue;
++                }
+                 if (params.action_type == ACTION_SERVO_SEQUENCE) {
+@@ -415,6 +425,11 @@ class OttoController {
+                             controller->otto_.Home(params.action_type != ACTION_HANDS_UP);
+                         }
+                     }
++                    if (controller->stop_requested_ && params.action_type != ACTION_HOME) {
++                        controller->otto_.SetRestState(false);
++                        controller->otto_.Home(true);
++                        controller->stop_requested_ = false;
++                    }
+                 }
+                 controller->is_action_in_progress_ = false;
+                 PowerManager::ResumeBatteryUpdate();
+@@ -705,16 +720,22 @@ class OttoController {
+ 
+         mcp_server.AddTool("self.otto.stop", "立即停止所有动作并复位", PropertyList(),
+                            [this](const PropertyList& properties) -> ReturnValue {
+-                               if (action_task_handle_ != nullptr) {
+-                                   vTaskDelete(action_task_handle_);
+-                                   action_task_handle_ = nullptr;
+-                               }
++                               // Cooperative stop: do NOT vTaskDelete.
++                               // Killing the task + re-Attach previously dropped PWM
++                               // (ledc_stop) and let servos lose holding stance.
++                               stop_requested_ = true;
+                                is_action_in_progress_ = false;
+                                PowerManager::ResumeBatteryUpdate();
+                                xQueueReset(action_queue_);
+-
++                               // Force Home even if software thought we were already resting.
++                               otto_.SetRestState(false);
+                                QueueAction(ACTION_HOME, 1, 1000, 1, 0);
++                               // Optional settle so MCP callers wait for stance (~900ms).
++                               // Uncomment if your MCP stack can tolerate a longer tool return:
++                               // vTaskDelay(pdMS_TO_TICKS(900));
++                               // stop_requested_ = false;
+                                return true;
+                            });

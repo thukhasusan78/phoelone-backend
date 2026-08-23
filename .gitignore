@@ -1,0 +1,89 @@
+# Secrets and local env
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+credentials.json
+cookies.txt
+*cookies*.txt
+youtube-cookies.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+.eggs/
+dist/
+build/
+pip-wheel-metadata/
+
+# Tests / linters / type checkers
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+
+# Logs and temp
+*.log
+*.tmp
+*.temp
+tmp/
+temp/
+.cache/
+
+# Debug / captured audio (never commit)
+debug_*.wav
+debug_*.mp3
+*_debug.wav
+debug_live_input.wav
+debug_last_utterance.wav
+
+# Local music library (keep the folder via .gitkeep)
+data/local_music/*
+!data/local_music/.gitkeep
+*.mp3
+*.wav
+*.m4a
+*.ogg
+*.flac
+*.aac
+
+# Databases and dumps
+*.db
+*.sqlite
+*.sqlite3
+*.dump
+postgres_data/
+backups/
+
+# Docker / Caddy volumes
+caddy_data/
+caddy_config/
+
+# Editors / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
+
+# Personal / sandbox outputs
+voicetype_test/outputs/
+
+# Tool caches
+.cursor/

@@ -1,0 +1,13 @@
+{
+  "tracks": [
+    {
+      "track": "Sample Myanmar Track",
+      "artist": "Joe Lay",
+      "aliases": ["ဂျိုးလေး", "Joe Lay", "ဂျိုး လေး", "JoeLay"],
+      "stream_url": "https://example.com/replace-with-cdn/joe-lay-sample.mp3",
+      "duration_s": 180,
+      "album": null,
+      "artwork_url": null
+    }
+  ]
+}
