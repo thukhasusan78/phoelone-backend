@@ -7,6 +7,7 @@ from starlette.testclient import TestClient
 
 from app.config import Settings
 from app.main import create_app
+from tests.activation import ota_and_bind
 from tests.fakes import FakeBrain
 
 
@@ -53,11 +54,81 @@ def app():
 
 
 def _token(client: TestClient) -> str:
-    response = client.get(
-        "/xiaozhi/ota/",
-        headers={"Device-Id": "aa:bb:cc:dd:ee:ff", "Client-Id": "cid"},
+    _, token = ota_and_bind(client, client_id="cid")
+    return token
+
+
+def _connect(client: TestClient, token: str):
+    return client.websocket_connect(
+        "/xiaozhi/v1/",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Protocol-Version": "1",
+            "Device-Id": "aa:bb:cc:dd:ee:ff",
+            "Client-Id": "cid",
+        },
     )
-    return response.json()["websocket"]["token"]
+
+
+def _complete_hello(ws) -> str:
+    ws.send_text(json.dumps(HELLO))
+    hello = _recv_json(ws)
+    assert hello["type"] == "hello"
+    assert hello["transport"] == "websocket"
+    assert hello["audio_params"]["sample_rate"] == 24000
+    session_id = hello["session_id"]
+    mcp_init = _recv_json(ws)
+    assert mcp_init["type"] == "mcp"
+    assert mcp_init["payload"]["method"] == "initialize"
+    ws.send_text(
+        json.dumps(
+            {
+                "session_id": session_id,
+                "type": "mcp",
+                "payload": {
+                    "jsonrpc": "2.0",
+                    "id": mcp_init["payload"]["id"],
+                    "result": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {"tools": {}},
+                        "serverInfo": {"name": "otto-robot", "version": "2.4.2"},
+                    },
+                },
+            }
+        )
+    )
+    tools_list = _recv_json(ws)
+    assert tools_list["payload"]["method"] == "tools/list"
+    ws.send_text(
+        json.dumps(
+            {
+                "session_id": session_id,
+                "type": "mcp",
+                "payload": {
+                    "jsonrpc": "2.0",
+                    "id": tools_list["payload"]["id"],
+                    "result": {
+                        "tools": [
+                            {
+                                "name": "self.otto.stop",
+                                "description": "stop",
+                                "inputSchema": {"type": "object", "properties": {}},
+                            },
+                            {
+                                "name": "self.otto.action",
+                                "description": "action",
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {"action": {"type": "string"}},
+                                },
+                            },
+                        ]
+                    },
+                },
+            }
+        )
+    )
+    return session_id
 
 
 def test_websocket_hello_and_listen(app) -> None:
@@ -66,25 +137,42 @@ def test_websocket_hello_and_listen(app) -> None:
     with TestClient(application) as client:
         application.state.brain_factory = lambda: brain
         token = _token(client)
-        with client.websocket_connect(
-            "/xiaozhi/v1/",
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Protocol-Version": "1",
-                "Device-Id": "aa:bb:cc:dd:ee:ff",
-                "Client-Id": "cid",
-            },
-        ) as ws:
-            ws.send_text(json.dumps(HELLO))
-            hello = _recv_json(ws)
-            assert hello["type"] == "hello"
-            assert hello["transport"] == "websocket"
-            assert hello["audio_params"]["sample_rate"] == 24000
-            session_id = hello["session_id"]
+        with _connect(client, token) as ws:
+            session_id = _complete_hello(ws)
+            assert session_id
 
-            mcp_init = _recv_json(ws)
-            assert mcp_init["type"] == "mcp"
-            assert mcp_init["payload"]["method"] == "initialize"
+
+def test_websocket_pong_is_known(app) -> None:
+    application, brain = app
+
+    with TestClient(application) as client:
+        application.state.brain_factory = lambda: brain
+        token = _token(client)
+        with _connect(client, token) as ws:
+            session_id = _complete_hello(ws)
+            ws.send_text(
+                json.dumps({"session_id": session_id, "type": "pong", "ts_ms": 1710000000000})
+            )
+            ws.send_text(
+                json.dumps(
+                    {
+                        "session_id": session_id,
+                        "type": "listen",
+                        "state": "start",
+                        "mode": "manual",
+                    }
+                )
+            )
+
+
+def test_websocket_sensor_notify_does_not_throw(app) -> None:
+    application, brain = app
+
+    with TestClient(application) as client:
+        application.state.brain_factory = lambda: brain
+        token = _token(client)
+        with _connect(client, token) as ws:
+            session_id = _complete_hello(ws)
             ws.send_text(
                 json.dumps(
                     {
@@ -92,46 +180,14 @@ def test_websocket_hello_and_listen(app) -> None:
                         "type": "mcp",
                         "payload": {
                             "jsonrpc": "2.0",
-                            "id": mcp_init["payload"]["id"],
-                            "result": {
-                                "protocolVersion": "2024-11-05",
-                                "capabilities": {"tools": {}},
-                                "serverInfo": {"name": "otto-robot", "version": "2.4.2"},
-                            },
+                            "method": "notifications/phoe_lone.event",
+                            "params": {"event": "pet", "ts_ms": 1},
                         },
                     }
                 )
             )
-            tools_list = _recv_json(ws)
-            assert tools_list["payload"]["method"] == "tools/list"
             ws.send_text(
-                json.dumps(
-                    {
-                        "session_id": session_id,
-                        "type": "mcp",
-                        "payload": {
-                            "jsonrpc": "2.0",
-                            "id": tools_list["payload"]["id"],
-                            "result": {
-                                "tools": [
-                                    {
-                                        "name": "self.otto.stop",
-                                        "description": "stop",
-                                        "inputSchema": {"type": "object", "properties": {}},
-                                    },
-                                    {
-                                        "name": "self.otto.action",
-                                        "description": "action",
-                                        "inputSchema": {
-                                            "type": "object",
-                                            "properties": {"action": {"type": "string"}},
-                                        },
-                                    },
-                                ]
-                            },
-                        },
-                    }
-                )
+                json.dumps({"session_id": session_id, "type": "pong"})
             )
 
 

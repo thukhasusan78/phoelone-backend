@@ -1,7 +1,7 @@
 # Phoe Lone Backend Production Plan (Python / FastAPI)
 
-**Status:** planning document only. Do not change application Python until this file is used as an implementation brief.  
-**Date:** 2026-08-23  
+**Status:** P0.5 / P0.6 / P0.S5 / P0.S6 implemented in the Python app (2026-08-25). Remaining P0/P1/P2 boxes below are still open.  
+**Date:** 2026-08-25  
 **Repo:** this VPS tree (`phoe_lone_server`).  
 **Companion:** ESP32 work lives in `CLIENT_PRODUCTION_PLAN.md` on the PC firmware repo. This file never assigns C++ or GPIO tasks.  
 **Invariant:** Silero VAD, Gemini Live STT, Edge TTS, local music, Otto MCP motion gating, and the existing hello/listen/abort path must keep working.
@@ -48,12 +48,15 @@ Stack: FastAPI + Starlette WebSocket, Uvicorn, Caddy TLS, Postgres, Redis. MQTT 
 
 ### 1.2 Gaps this plan owns
 
-- Inbound `type: pong` is logged as `session.unknown_type` (`DeviceSession._on_json` else branch).
-- `McpClient.on_message` **returns immediately** if `method` starts with `notifications` — sensor events are discarded.
-- Catalog + `SYSTEM_PROMPT` still say IMU/light/touch are **unwired stubs**.
-- `AuthService.issue_or_get_token` **rotates the token on every OTA** (`rotate=True`). Device NVS overwrite usually works if OTA-then-WS is serial; a second OTA during a live WS bricks the session.
+**Done (2026-08-25):**
+- Inbound `type: pong` is a first-class type (`PongMessage`); no `session.unknown_type`.
+- `McpClient.on_message` routes `notifications/*` to `DeviceSession._on_sensor_event`; `notifications/phoe_lone.event` is logged with `device_id`.
+- Catalog + `SYSTEM_PROMPT` describe dual-fleet `wired:true` / `wired:false` sensors; never invent readings; fall → prefer stop.
+- `prepare_ota` does **not** rotate the WS token on ordinary version checks. Wrapped `token_ciphertext` is stored at provision; OTA echoes the same bearer. Hash-only legacy rows get a one-time rotate + wrap (`auth.token_wrap_migrate`) — that single post-deploy OTA can disconnect an already-open WS.
+
+**Still open:**
 - OTA always `firmware.version = 0.0.0` and dummy URL. No board-channel selection, no signed URL, no `phoe-lone` identity.
-- No `_on_sensor_event`, no Gemini INTERNAL EVENT for pet/pickup.
+- No Gemini INTERNAL EVENT for pet/pickup (P1.8).
 - No proactive `alert` for battery/Wi-Fi (device MCP can be polled; nothing polls).
 - `system` / `reboot` helper exists in `messages.py` and is never sent.
 - Chat memory: Gemini Live socket + in-RAM resumption handle; dies with process/session.
@@ -110,7 +113,7 @@ Device (new firmware) may reply:
 { "session_id": "<id>", "type": "pong", "ts_ms": <echo> }
 ```
 
-Today `_on_json` hits `else: log.info("session.unknown_type", type=msg_type)`.
+Today `_on_json` treats `type == "pong"` as known (`PongMessage`). `_last_rx` is already updated for any message at the start of `_receive_loop`.
 
 **Required:**
 
@@ -248,7 +251,8 @@ Old firmware: `wired: false`. Prompts must handle **both** until all robots are 
 def on_message(self, payload: dict[str, Any]) -> None:
     method = payload.get("method")
     if isinstance(method, str) and method.startswith("notifications"):
-        return  # DROPS ALL DEVICE NOTIFICATIONS
+        handler(payload)  # DeviceSession._on_sensor_event
+        return
 ```
 
 JSON-RPC notifications have **no `id`**, so they also fail the later `id` int check. The early return is the explicit drop.
@@ -326,8 +330,8 @@ Same rules as music-end: empty string allowed; no JSON speech; `max_tool_rounds`
 
 ### 6.1 Files
 
-- `app/mcp/catalog.py` — `self.phoe_lone.imu.get_reading`, `.light.get_level`, `.touch.get_state` currently “unwired / GPIO_NUM_NC”.
-- `app/ai/prompts.py` — HARDWARE: “IMU, light, and touch are unwired stubs.”
+- `app/mcp/catalog.py` — `self.phoe_lone.imu.get_reading`, `.light.get_level`, `.touch.get_state` dual-fleet (`wired:true` / `wired:false`).
+- `app/ai/prompts.py` — HARDWARE: sensors may be wired; still handle stubs; fall → stop.
 - `PHOE_LONE_FALLBACK_NAMES` already includes the three tools.
 
 ### 6.2 After firmware reports `wired: true`
@@ -360,7 +364,7 @@ P1.2 (firmware maps emotion → short motion): optional prompt line: “Call set
 
 - Requires `Device-Id` + `Client-Id`.
 - Optional POST body (system info); location extract from `board.ssid` / BSSID.
-- `issue_or_get_token` → **always rotate**.
+- `prepare_ota` returns a **stable** bearer after provision (wrapped `token_ciphertext`). Rotate only via CLI `phoe-lone rotate` or first wrap-migrate of hash-only rows.
 - Response: `websocket.url/token/version`, `server_time`, `firmware.version` + `url` + `force: 0`.
 - No `mqtt`, no `activation` (good for private VPS).
 - Dummy URL: `settings.resolved_firmware_url` → `{origin}/firmware/none.bin` unless `FIRMWARE_URL` set.
@@ -371,17 +375,9 @@ Device skips upgrade when version is not newer. 404 on the bin is extra safety.
 
 ### 7.2 P0.5 — token rotation
 
-`issue_or_get_token` must **not** rotate on every version check.
+`prepare_ota` does **not** rotate on every version check.
 
-- Return existing token (need a way to issue plaintext once, or store wrapped token — **today you only store `token_hash`**).
-- Practical options:
-  1. **Rotate only** via CLI `phoe-lone rotate` and on first provision. OTA returns the **same** bearer the device already has. Problem: server cannot reconstruct the plaintext token from hash → device must keep NVS token; OTA `websocket.token` must echo a token the device already uses **or** you store an encrypted token at provision time.
-  2. **Rotate on OTA but only if** header `X-Phoe-Rotate: 1` or query — default stable.
-  3. Store `token_last4` only for support; plaintext only in memory at provision.
-
-Recommended: **stable token after provision.** OTA JSON `websocket.token` = the token already in NVS. Implementation: persist encrypted token at provision (`AUTH_PEPPER` wrapping) **or** stop sending a new token field when `existing` and not rotate (device keeps NVS; some XiaoZhi builds overwrite NVS with whatever is in JSON — **verify**: if the device always writes `websocket.token` from OTA, you **must** send the same string, which requires storing it encrypted).
-
-Read `main/ota.cc` behavior: it copies `websocket` object into NVS **verbatim**. If you send a new random token every boot, WS after OTA uses the new one (works). If you send a new token **while WS is open**, the open socket still has the old bearer until reconnect — then mismatch. **Fix: do not rotate in `issue_or_get_token` on ordinary OTA.**
+Implemented: persist wrapped token at provision (`AUTH_PEPPER` XOR+HMAC wrap in `app/auth/token_wrap.py`). OTA JSON `websocket.token` echoes the same string the device already has in NVS. CLI `phoe-lone rotate` remains the explicit rotate path. Hash-only legacy rows (`token_ciphertext` null) rotate once on the next active OTA (`auth.token_wrap_migrate`).
 
 ### 7.3 Dummy firmware (keep in lab)
 
@@ -446,15 +442,15 @@ Firmware boxes are in `CLIENT_PRODUCTION_PLAN.md`. Do not mix.
 
 ### P0 — keepalive, notify plumbing, auth, lab OTA
 
-- [ ] **P0.5** OTA does not rotate WS token on every check; live session survives a duplicate OTA POST.
-- [ ] **P0.6** Inbound `pong` is a first-class type; no `unknown_type`.
+- [x] **P0.5** OTA does not rotate WS token on every check; live session survives a duplicate OTA POST.
+- [x] **P0.6** Inbound `pong` is a first-class type; no `unknown_type`.
 - [ ] **P0.9** Lab remains `0.0.0` + 404 bin; `force: 0`; documented in README.
-- [ ] **P0.S5** `notifications/*` not dropped; `notifications/phoe_lone.event` logged with device_id.
-- [ ] **P0.S6** Prompts/catalog: sensors **may** be wired; still handle `wired:false`; never invent ax/lux; fall → prefer stop not walk.
+- [x] **P0.S5** `notifications/*` not dropped; `notifications/phoe_lone.event` logged with device_id.
+- [x] **P0.S6** Prompts/catalog: sensors **may** be wired; still handle `wired:false`; never invent ax/lux; fall → prefer stop not walk.
 - [ ] Ping continues during SPEAKING/music (verify loop; add a test if missing).
-- [ ] `backend_spec.md`: `ping` / `pong` / notification schema.
-- [ ] Contract test: skip ping, accept pong; notify does not throw.
-- [ ] Dual-fleet: stub `wired:false` still lists tools and does not 500.
+- [x] `backend_spec.md`: `ping` / `pong` / notification schema.
+- [x] Contract test: skip ping, accept pong; notify does not throw.
+- [x] Dual-fleet: stub `wired:false` still lists tools and does not 500.
 
 ### P1 — feel + ops signals
 
@@ -462,7 +458,7 @@ Firmware boxes are in `CLIENT_PRODUCTION_PLAN.md`. Do not mix.
 - [ ] **P1.6** Music abort already exists; do not regress `_abort` / generation bump.
 - [ ] **P1.7** Optional: poll or cache `self.battery.get_level` rarely; or send `alert` when notify/status says low (do not block TTS path).
 - [ ] **P1.8** Gemini INTERNAL EVENT on `pet`/`pickup` while listening, rate-limited; empty reply OK.
-- [ ] Fall: motion inhibit window + optional `alert`.
+- [ ] Fall: motion inhibit window is in `_on_sensor_event` (5 s, Otto motion skipped except `self.otto.stop`); optional `alert` still open.
 - [ ] Metrics: `phoe_lone_events_total{event=}`, `ws_pongs_total`.
 
 ### P2 — product
@@ -480,11 +476,11 @@ Out of scope: MQTT voice, 4G, LivingAI APIs, C++.
 
 ### Acceptance (server-only)
 
-- [ ] `pong` not in unknown_type logs.
-- [ ] Sending notify JSON in a unit test hits `_on_sensor_event`, not drop.
+- [x] `pong` not in unknown_type logs.
+- [x] Sending notify JSON in a unit test hits `_on_sensor_event`, not drop.
 - [ ] 4-minute music: session stays open (ping still queued).
-- [ ] Second OTA POST does not invalidate the current WS bearer.
-- [ ] Prompt does not tell the model sensors are unwired **after** catalog switch; still safe if one device is old.
+- [x] Second OTA POST does not invalidate the current WS bearer.
+- [x] Prompt does not tell the model sensors are unwired **after** catalog switch; still safe if one device is old.
 - [ ] Dummy firmware still 404 in lab Compose.
 
 ---
@@ -501,13 +497,15 @@ Out of scope: MQTT voice, 4G, LivingAI APIs, C++.
 | `app/ai/prompts.py` | Hardware + notify policy |
 | `app/ai/gemini.py` | Reuse INTERNAL EVENT helper for pet |
 | `app/ai/tool_router.py` | Fall motion inhibit if session flag |
-| `app/auth/service.py` | Stable token on OTA |
+| `app/auth/service.py` | Stable token on OTA (done) |
+| `app/auth/token_wrap.py` | HMAC wrap for `token_ciphertext` (done) |
+| `alembic/versions/0003_token_ciphertext.py` | Nullable wrapped-token column (done) |
 | `app/api/ota.py` | Token + later firmware channel |
 | `app/api/health.py` | Dummy bin stays 404 in lab |
 | `app/config.py` | Optional `firmware_*` already; ping interval |
-| `backend_spec.md` | ping/pong/notify |
-| `tests/contract/test_websocket.py` | pong; notify |
-| `tests/unit/test_catalog.py` | descriptions |
+| `backend_spec.md` | ping/pong/notify (done) |
+| `tests/contract/test_websocket.py` | pong; notify (done) |
+| `tests/unit/test_catalog.py` | descriptions (done) |
 | `README.md` | Lab OTA dummy; token rotate policy |
 
 ### First backend slices (order)

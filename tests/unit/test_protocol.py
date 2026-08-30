@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import pytest
-
 from app.protocol.messages import llm_emotion, server_hello, tts
-from app.protocol.models import DeviceHello, ListenMessage
+from app.protocol.models import DeviceHello, ListenMessage, PongMessage
 
 
 def test_device_hello_parse() -> None:
@@ -40,3 +38,12 @@ def test_tts_and_emotion() -> None:
     assert '"state":"start"' in tts("s", "start")
     assert '"emotion":"neutral"' in llm_emotion("s", "unknown")
     assert '"emotion":"happy"' in llm_emotion("s", "happy")
+
+
+def test_pong_parse() -> None:
+    msg = PongMessage.model_validate(
+        {"session_id": "abc", "type": "pong", "ts_ms": 1710000000000, "extra": True}
+    )
+    assert msg.type == "pong"
+    assert msg.ts_ms == 1710000000000
+    assert msg.session_id == "abc"

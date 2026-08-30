@@ -89,3 +89,63 @@ async def test_mcp_call_does_not_deadlock_on_lock() -> None:
         timeout=1,
     )
     assert text == "ok"
+
+
+async def test_mcp_notification_invokes_handler() -> None:
+    seen: list[dict] = []
+
+    async def send(_payload: str) -> None:
+        return None
+
+    client = McpClient("sid", send)
+    client.set_notification_handler(seen.append)
+    client.on_message(
+        {
+            "jsonrpc": "2.0",
+            "method": "notifications/phoe_lone.event",
+            "params": {"event": "pet", "ts_ms": 1},
+        }
+    )
+    assert len(seen) == 1
+    assert seen[0]["params"]["event"] == "pet"
+
+
+async def test_mcp_notification_does_not_break_correlation() -> None:
+    sent: list[str] = []
+
+    async def send(payload: str) -> None:
+        sent.append(payload)
+
+    client = McpClient("sid", send, timeout_s=0.2)
+    client.set_notification_handler(lambda _p: None)
+    task_result = {}
+
+    async def call() -> None:
+        task_result["r"] = await client.send_request("initialize", {"capabilities": {}})
+
+    import asyncio
+
+    task = asyncio.create_task(call())
+    await asyncio.sleep(0.05)
+    client.on_message(
+        {
+            "jsonrpc": "2.0",
+            "method": "notifications/phoe_lone.event",
+            "params": {"event": "bright"},
+        }
+    )
+    client.on_message({"jsonrpc": "2.0", "id": 1, "result": {"ok": True}})
+    await task
+    assert task_result["r"]["ok"] is True
+
+
+async def test_mcp_notification_handler_exception_is_swallowed() -> None:
+    async def send(_payload: str) -> None:
+        return None
+
+    def boom(_payload: dict) -> None:
+        raise RuntimeError("handler exploded")
+
+    client = McpClient("sid", send)
+    client.set_notification_handler(boom)
+    client.on_message({"jsonrpc": "2.0", "method": "notifications/other", "params": {}})

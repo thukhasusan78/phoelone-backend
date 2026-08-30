@@ -5,6 +5,7 @@ from starlette.testclient import TestClient
 
 from app.config import Settings
 from app.main import create_app
+from tests.activation import device_headers, ota_and_bind
 
 
 @pytest.fixture
@@ -22,7 +23,7 @@ def settings() -> Settings:
 
 
 @pytest.fixture
-def client(settings: Settings):
+def client(settings) -> Settings:
     app = create_app(settings)
     with TestClient(app) as test_client:
         yield test_client, app
@@ -35,13 +36,20 @@ def test_health(client) -> None:
     assert response.json()["status"] == "ok"
 
 
+def test_portal_home(client) -> None:
+    ac, _ = client
+    response = ac.get("/")
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert "Activate Mickey" in response.text
+
+
 @pytest.mark.parametrize("path", ["/xiaozhi/ota", "/xiaozhi/ota/"])
 @pytest.mark.parametrize("method", ["GET", "POST"])
 def test_ota_paths(client, path: str, method: str) -> None:
     ac, _app = client
     headers = {
-        "Device-Id": "aa:bb:cc:dd:ee:ff",
-        "Client-Id": "11111111-2222-3333-4444-555555555555",
+        **device_headers(),
         "Activation-Version": "1",
         "Accept-Language": "en-US",
     }
@@ -52,7 +60,13 @@ def test_ota_paths(client, path: str, method: str) -> None:
     assert response.status_code == 200
     body = response.json()
     assert "mqtt" not in body
-    assert "activation" not in body
+    assert body["activation"]["code"].isdigit()
+    assert len(body["activation"]["code"]) == 6
+    assert body["activation"]["challenge"]
+    assert body["activation"]["message"] == (
+        "Please enter the verification code in phoelone.thukha.online"
+    )
+    assert body["activation"]["timeout_ms"] == 30000
     assert body["websocket"]["url"].endswith("/xiaozhi/v1/")
     assert body["websocket"]["version"] == 1
     assert body["websocket"]["token"]
@@ -73,7 +87,7 @@ def test_extract_ota_wifi_ssid_without_gps() -> None:
         {
             "version": 2,
             "board": {
-                "type": "otto-robot",
+                "type": "mickey",
                 "ssid": "MandalayFiber",
                 "rssi": -50,
                 "channel": 6,
@@ -92,7 +106,15 @@ def test_extract_ota_optional_bssid_and_city() -> None:
     from app.location import extract_ota_location
 
     hint = extract_ota_location(
-        {"board": {"ssid": "Home", "bssid": "AA-BB-CC-DD-EE-FF", "city": "Mandalay", "lat": 21.9, "lng": 96.1}}
+        {
+            "board": {
+                "ssid": "Home",
+                "bssid": "AA-BB-CC-DD-EE-FF",
+                "city": "Mandalay",
+                "lat": 21.9,
+                "lng": 96.1,
+            }
+        }
     )
     assert hint.bssid == "aa:bb:cc:dd:ee:ff"
     assert hint.city == "Mandalay"
@@ -102,33 +124,77 @@ def test_extract_ota_optional_bssid_and_city() -> None:
 
 def test_ota_unknown_fields_ok(client) -> None:
     ac, _ = client
-    headers = {
-        "Device-Id": "aa:bb:cc:dd:ee:ff",
-        "Client-Id": "client-x",
-    }
+    headers = device_headers(client_id="client-x")
     response = ac.post(
         "/xiaozhi/ota/",
         headers=headers,
-        json={"version": 2, "future_field": {"nested": True}, "board": {"type": "otto-robot"}},
+        json={"version": 2, "future_field": {"nested": True}, "board": {"type": "mickey"}},
     )
     assert response.status_code == 200
+    assert "activation" in response.json()
 
 
 def test_ota_stores_wifi_ssid(client) -> None:
     ac, app = client
-    headers = {
-        "Device-Id": "aa:bb:cc:dd:ee:ff",
-        "Client-Id": "client-wifi",
-    }
+    headers = device_headers(client_id="client-wifi")
     response = ac.post(
         "/xiaozhi/ota/",
         headers=headers,
-        json={"version": 2, "board": {"type": "otto-robot", "ssid": "MandalayFiber"}},
+        json={"version": 2, "board": {"type": "mickey", "ssid": "MandalayFiber"}},
     )
     assert response.status_code == 200
     hint = app.state.locations._mem.get("aa:bb:cc:dd:ee:ff")
     assert hint is not None
     assert hint["ssid"] == "MandalayFiber"
+
+
+def test_activation_poll_and_bind(client) -> None:
+    ac, _ = client
+    headers = device_headers(client_id="wait-bind")
+    first = ac.post("/xiaozhi/ota/", headers=headers, json={"version": 2})
+    assert first.status_code == 200
+    activation = first.json()["activation"]
+    code = activation["code"]
+    challenge = activation["challenge"]
+
+    pending = ac.post("/xiaozhi/ota/activate", headers=headers, json={})
+    assert pending.status_code == 202
+
+    retry = ac.post("/xiaozhi/ota/", headers=headers, json={"version": 2})
+    assert retry.json()["activation"]["code"] == code
+    assert retry.json()["activation"]["challenge"] == challenge
+    assert retry.json()["websocket"]["token"] == first.json()["websocket"]["token"]
+
+    bad = ac.post("/activate", json={"code": "000000"})
+    assert bad.status_code == 400
+    assert bad.json()["ok"] is False
+
+    ok = ac.post("/activate", json={"code": code})
+    assert ok.status_code == 200
+    assert ok.json()["ok"] is True
+
+    done = ac.post("/xiaozhi/ota/activate", headers=headers, json={})
+    assert done.status_code == 200
+
+    bound = ac.post("/xiaozhi/ota/", headers=headers, json={"version": 2})
+    assert bound.status_code == 200
+    assert "activation" not in bound.json()
+    first_token = bound.json()["websocket"]["token"]
+    again = ac.post("/xiaozhi/ota/", headers=headers, json={"version": 2})
+    assert again.status_code == 200
+    assert again.json()["websocket"]["token"] == first_token
+
+
+def test_activation_form_bind(client) -> None:
+    ac, _ = client
+    headers = device_headers(client_id="form-bind")
+    ota = ac.post("/xiaozhi/ota/", headers=headers, json={"version": 2})
+    code = ota.json()["activation"]["code"]
+    page = ac.post("/activate", data={"code": code})
+    assert page.status_code == 200
+    assert "Dance pad" in page.text
+    assert ac.cookies.get("companion")
+    assert ac.post("/xiaozhi/ota/activate", headers=headers, json={}).status_code == 200
 
 
 def test_provisioned_only() -> None:
@@ -152,12 +218,8 @@ def test_provisioned_only() -> None:
 
 def test_vision_explain_stub(client) -> None:
     ac, _ = client
-    headers = {
-        "Device-Id": "aa:bb:cc:dd:ee:ff",
-        "Client-Id": "11111111-2222-3333-4444-555555555555",
-    }
-    ota = ac.post("/xiaozhi/ota/", headers=headers, json={"version": 2})
-    token = ota.json()["websocket"]["token"]
+    headers = device_headers()
+    _, token = ota_and_bind(ac, client_id=headers["Client-Id"])
     headers["Authorization"] = f"Bearer {token}"
     empty = ac.post("/vision/explain/", headers=headers)
     assert empty.status_code == 200
@@ -182,3 +244,36 @@ def test_vision_explain_unauthorized(client) -> None:
         headers={"Device-Id": "aa:bb:cc:dd:ee:ff", "Client-Id": "missing-device"},
     )
     assert response.status_code == 403
+
+
+def test_pending_device_cannot_open_vision(client) -> None:
+    ac, _ = client
+    headers = device_headers(client_id="still-pending")
+    ota = ac.post("/xiaozhi/ota/", headers=headers, json={"version": 2})
+    token = ota.json()["websocket"]["token"]
+    headers["Authorization"] = f"Bearer {token}"
+    response = ac.post("/vision/explain/", headers=headers)
+    assert response.status_code == 403
+
+
+def test_ota_accepts_mickey_board_type(client) -> None:
+    from app.ota.boards import PRIMARY_BOARD_TYPE, is_known_board_type
+
+    assert PRIMARY_BOARD_TYPE == "mickey"
+    assert is_known_board_type("Mickey")
+    assert is_known_board_type("phoe-lone")
+    assert is_known_board_type("otto-robot")
+    assert not is_known_board_type("unknown-board")
+
+    ac, _ = client
+    headers = device_headers(client_id="mickey-board")
+    response = ac.post(
+        "/xiaozhi/ota/",
+        headers=headers,
+        json={"version": 2, "board": {"type": "mickey", "name": "mickey"}},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert "mqtt" not in body
+    assert body["websocket"]["token"]
+    assert body["firmware"]["force"] == 0

@@ -102,7 +102,7 @@ def music_search_query(text: str) -> str:
     """Turn a spoken play request into a catalog search string."""
     cleaned = (text or "").strip()
     cleaned = re.sub(
-        r"(hello|hi|hey|simbia|ဖိုးလုန်း|ဟယ်လို)",
+        r"(hello|hi|hey|simbia|ဖိုးလုန်း|mickey|မစ်ကီ|ဟယ်လို)",
         " ",
         cleaned,
         flags=re.IGNORECASE,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from typing import Any
 
 from app.observability.logging import get_logger
@@ -30,6 +31,10 @@ class McpClient:
         self.tool_by_name: dict[str, dict[str, Any]] = {}
         self._lock = asyncio.Lock()
         self._motion_lock = asyncio.Lock()
+        self._notification_handler: Callable[[dict[str, Any]], None] | None = None
+
+    def set_notification_handler(self, handler: Callable[[dict[str, Any]], None] | None) -> None:
+        self._notification_handler = handler
 
     def _allocate_id(self) -> int:
         request_id = self._next_id
@@ -72,6 +77,12 @@ class McpClient:
     def on_message(self, payload: dict[str, Any]) -> None:
         method = payload.get("method")
         if isinstance(method, str) and method.startswith("notifications"):
+            handler = self._notification_handler
+            if handler is not None:
+                try:
+                    handler(payload)
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("mcp.notification_failed", error=str(exc), method=method)
             return
         request_id = payload.get("id")
         if not isinstance(request_id, int):

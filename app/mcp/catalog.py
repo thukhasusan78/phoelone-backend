@@ -1,4 +1,4 @@
-"""English MCP catalog for Phoe Lone / otto-robot LLM-visible tools.
+"""English MCP catalog for Mickey / otto-robot LLM-visible tools.
 
 Device tools are implemented on the ESP32. This module supplies complete
 English descriptions and input schemas so Gemini can call them accurately.
@@ -208,22 +208,84 @@ LLM_TOOLS: dict[str, dict[str, Any]] = {
     "self.phoe_lone.imu.get_reading": {
         "name": "self.phoe_lone.imu.get_reading",
         "description": (
-            "IMU stub. This board has no IMU wired (GPIO_NUM_NC). "
-            "Do not invent accelerometer or gyro values."
+            "Read the MPU6050 IMU. Returns wired:true with ax/ay/az, gx/gy/gz, pitch, roll, "
+            "temp_c, and event (still|moving|pickup|putdown|fall|shake) when the sensor is live; "
+            "wired:false on stub firmware. If wired:false or ok:false, say the sensor is not "
+            "connected or failed — never invent accelerometer or gyro values. "
+            "Use for 'are you being held' or 'did you fall'. If event is fall, call "
+            "self.otto.stop if moving; do not walk."
         ),
         "inputSchema": _object({}),
     },
     "self.phoe_lone.light.get_level": {
         "name": "self.phoe_lone.light.get_level",
         "description": (
-            "Light-sensor stub. Not wired on stock otto-robot. Do not invent a lux reading."
+            "Read the light sensor. Returns wired:true with lux, bucket "
+            "(dark|dim|indoor|bright), and raw when live; wired:false on stub firmware. "
+            "If wired:false or ok:false, say the sensor is not connected — never invent a lux "
+            "reading. Call this when the user asks if it is dark or bright."
         ),
         "inputSchema": _object({}),
     },
     "self.phoe_lone.touch.get_state": {
         "name": "self.phoe_lone.touch.get_state",
         "description": (
-            "Touch-sensor stub. Not wired on stock otto-robot. Do not invent touch state."
+            "Read the head touch sensor. Returns wired:true with touched, count, and ms_held "
+            "when live; wired:false on stub firmware. A pet may also arrive as an MCP "
+            "notification — do not require the user to say they petted you. "
+            "If wired:false or ok:false, say the sensor is not connected. "
+            "Never invent touch state."
+        ),
+        "inputSchema": _object({}),
+    },
+    "self.mickey.alarm.set": {
+        "name": "self.mickey.alarm.set",
+        "description": (
+            "Set the overnight wake alarm on the robot clock (local time, 24-hour). "
+            "hour is 0-23, minute is 0-59. 7:00 AM is hour=7, minute=0; 7:00 PM is hour=19. "
+            "repeat=true means every day; repeat=false or omit means once. "
+            "sleep_now=true also starts deep sleep after storing the alarm "
+            "(good night + wake-me-at). Do not invent a time; ask if the hour is missing."
+        ),
+        "inputSchema": _object(
+            {
+                "hour": {"type": "integer", "description": "Local hour 0-23"},
+                "minute": {"type": "integer", "description": "Local minute 0-59"},
+                "repeat": {
+                    "type": "boolean",
+                    "description": "true=daily, false=once; default false",
+                },
+                "sleep_now": {
+                    "type": "boolean",
+                    "description": "true=enter deep sleep after saving the alarm",
+                },
+            },
+            ["hour", "minute"],
+        ),
+    },
+    "self.mickey.alarm.get": {
+        "name": "self.mickey.alarm.get",
+        "description": (
+            "Read the stored wake alarm. Call when the user asks what time the alarm is, "
+            "whether an alarm is set, or to confirm before changing it."
+        ),
+        "inputSchema": _object({}),
+    },
+    "self.mickey.alarm.cancel": {
+        "name": "self.mickey.alarm.cancel",
+        "description": (
+            "Clear the stored wake alarm. Call when the user cancels the alarm, "
+            "says do not wake them, or turns the alarm off."
+        ),
+        "inputSchema": _object({}),
+    },
+    "self.mickey.sleep.now": {
+        "name": "self.mickey.sleep.now",
+        "description": (
+            "Enter deep sleep now (or a firmware bench-test delay). "
+            "Call for good night, go to sleep, I am going to bed — without a wake time. "
+            "If they also gave a wake time, call self.mickey.alarm.set with sleep_now=true "
+            "instead of this tool. Not a chat-exit tool."
         ),
         "inputSchema": _object({}),
     },
@@ -271,7 +333,18 @@ PHOE_LONE_FALLBACK_NAMES = [
     "self.phoe_lone.imu.get_reading",
     "self.phoe_lone.light.get_level",
     "self.phoe_lone.touch.get_state",
+    "self.mickey.alarm.set",
+    "self.mickey.alarm.get",
+    "self.mickey.alarm.cancel",
+    "self.mickey.sleep.now",
 ]
+
+MICKEY_DEVICE_TOOLS = (
+    "self.mickey.alarm.set",
+    "self.mickey.alarm.get",
+    "self.mickey.alarm.cancel",
+    "self.mickey.sleep.now",
+)
 
 
 def is_forbidden(name: str) -> bool:

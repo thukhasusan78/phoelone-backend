@@ -9,6 +9,7 @@ from app.ai.gemini import FunctionCall
 from app.audio.opus import DOWNLINK_FRAME_SAMPLES
 from app.config import Settings
 from app.main import create_app
+from tests.activation import ota_and_bind
 from tests.fakes import FakeBrain, QuietCodec, SilentCodec, SpeechThenQuietCodec
 
 
@@ -55,11 +56,11 @@ async def _fake_pcm(_mp3: bytes, timeout_s: float = 45.0) -> bytes:
     return b"\x00\x00" * 100
 
 
+from tests.activation import ota_and_bind
+
+
 def _open_session(client):
-    token = client.get(
-        "/xiaozhi/ota/",
-        headers={"Device-Id": "aa:bb:cc:dd:ee:ff", "Client-Id": "cid"},
-    ).json()["websocket"]["token"]
+    _, token = ota_and_bind(client, client_id="cid")
     return client.websocket_connect(
         "/xiaozhi/v1/",
         headers={

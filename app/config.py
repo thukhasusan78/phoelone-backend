@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     auth_pepper: str = "dev-pepper-change-me"
     allow_auto_provision: bool = False
     metrics_token: str = ""
+    activation_message: str = "Please enter the verification code in phoelone.thukha.online"
+    activation_ttl_s: int = 900
+    activation_timeout_ms: int = 30000
+    activation_rate_limit_per_minute: int = 10
 
     gemini_api_keys: str = ""
     gemini_model: str = "gemini-3.1-flash-live-preview"
@@ -118,6 +122,9 @@ class Settings(BaseSettings):
     max_concurrent_sessions: int = 32
     ota_rate_limit_per_minute: int = 30
     ws_rate_limit_per_minute: int = 20
+    companion_rate_limit_per_minute: int = 30
+    companion_cookie_ttl_s: int = 30 * 24 * 3600
+    companion_pin: str = ""
     max_tts_chars: int = 800
     redis_cache_ttl_s: int = 300
 

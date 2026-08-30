@@ -377,9 +377,10 @@ class GeminiLiveBrain:
         event = (
             f"INTERNAL EVENT: music playback {status}. "
             f"Title: {label}. The robot speaker has stopped. "
-            "This is not user speech. Do not call any tools. "
-            "Reply with one short Burmese sentence that the song finished, "
-            "or output an empty string."
+            "This is not user speech. You MAY call set_emotion. "
+            "Do not call search_music or any other tool. "
+            "You MUST reply with one short spoken Burmese sentence "
+            "that the song has finished. Never reply empty."
         )
         self._streaming = False
         self._activity_started = False

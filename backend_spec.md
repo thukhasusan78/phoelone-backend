@@ -10,10 +10,8 @@ This document is the XiaoZhi **wire protocol** (OTA, WebSocket, MCP, audio frami
 Point the device at this VPS by setting **only** `CONFIG_OTA_URL` (or NVS `wifi.ota_url`) to:
 
 ```
-http://<VPS-PUBLIC-IP-OR-DOMAIN>:8000/xiaozhi/ota/
+https://phoelone.thukha.online/xiaozhi/ota/
 ```
-
-Prefer HTTPS in production (`https://<domain>/xiaozhi/ota/`).
 
 ---
 
@@ -22,8 +20,10 @@ Prefer HTTPS in production (`https://<domain>/xiaozhi/ota/`).
 ```
 ESP32 (otto-robot firmware)
   │  boot
-  ├─ HTTP POST  /xiaozhi/ota/     →  writes websocket/mqtt NVS, optional firmware URL
-  ├─ WebSocket  ws(s)://host/xiaozhi/v1/   →  hello, Opus, JSON, MCP
+  ├─ HTTP POST  /xiaozhi/ota/           →  websocket NVS, optional firmware URL, activation code if unbound
+  ├─ HTTP POST  /xiaozhi/ota/activate   →  202 until portal bind, then 200
+  ├─ HTTPS GET  /                       →  6-digit activation portal
+  ├─ WebSocket  wss://phoelone.thukha.online/xiaozhi/v1/   →  hello, Opus, JSON, MCP
   └─ optional MQTT + UDP          →  same JSON as WS; audio on UDP/AES-CTR
 
 VPS backend (you implement)
@@ -107,7 +107,7 @@ The device parses these **top-level objects**. Unknown keys are ignored. String/
 ```json
 {
   "websocket": {
-    "url": "ws://<VPS-HOST>:8000/xiaozhi/v1/",
+    "url": "wss://phoelone.thukha.online/xiaozhi/v1/",
     "token": "<opaque-token>",
     "version": 1
   },
@@ -125,13 +125,13 @@ The device parses these **top-level objects**. Unknown keys are ignored. String/
   },
   "firmware": {
     "version": "0.0.0",
-    "url": "http://<VPS-HOST>:8000/firmware/none.bin",
+    "url": "https://phoelone.thukha.online/firmware/none.bin",
     "force": 0
   },
   "activation": {
-    "message": "Enter this code on the console",
+    "message": "Please enter the verification code in phoelone.thukha.online",
     "code": "123456",
-    "challenge": "<optional hmac challenge>",
+    "challenge": "<uuid>",
     "timeout_ms": 30000
   }
 }
@@ -147,7 +147,28 @@ The device parses these **top-level objects**. Unknown keys are ignored. String/
 | `mqtt.*` | Only if using MQTT transport | Every string/number child is stored under NVS `mqtt`. If omitted, device logs “No mqtt section”. |
 | `server_time.timestamp` | Recommended | Milliseconds. Device adds `timezone_offset` minutes then `settimeofday`. Myanmar offset example: `390`. |
 | `firmware.version` + `firmware.url` | Recommended | If `version` is **newer** than running firmware, device starts OTA download. Use a dummy version `0.0.0` and a non-downloadable URL to skip upgrades. `force: 1` forces install even if not newer. |
-| `activation` | Optional | If `code` is present, device shows activation UI and plays digit sounds. Omit this object for an always-open local/VPS server. |
+| `activation` | Pending devices only | If `code` is present, the robot shows the activation UI and plays digit sounds, then polls `POST /xiaozhi/ota/activate`. **Omit this object once the device is bound**, or the firmware stays on the activation screen. DIY Otto boards have no eFuse HMAC: `Activation-Version: 1` and activate body `{}`. |
+
+### 2.4 Device activation poll and web portal
+
+**Pending (unbound) `Device-Id` + `Client-Id`:** OTA HTTP 200 includes `activation` (6-digit `code`, UUID `challenge`, portal `message`) plus `websocket.url` / `token`. WebSocket authenticate is **403** until bound.
+
+**Activate poll:** `POST /xiaozhi/ota/activate` (and `/xiaozhi/ota/activate/`). Same `Device-Id` / `Client-Id` headers. Body may be `{}` (v1) or an HMAC payload (v2, ignored except optional `challenge` match).
+
+| Status | Meaning |
+|--------|---------|
+| 202 | Still waiting for the user to enter the code at `https://phoelone.thukha.online/` |
+| 200 | Bound. Firmware re-runs CheckVersion; that OTA JSON **must not** include `activation`. |
+| 403 | Device disabled |
+| 400 | Identity missing, or `challenge` does not match |
+
+**Web portal:** `GET /` (HTML form). `POST /activate` with form field `code` or JSON `{"code":"123456"}`. A valid pending code marks the device `active` and sets an HttpOnly `companion` cookie (`device_id` + `client_id`, HMAC with `AUTH_PEPPER`, default 30 days). Codes expire after `ACTIVATION_TTL_S` (default 15 minutes); the next OTA issues a new code.
+
+`GET /` with a valid companion cookie renders the dashboard (presence, dance pad, Rock-Paper-Scissors). Without a cookie it stays the activation form. `POST /companion/logout` clears the cookie. If `COMPANION_PIN` is set, `POST /companion/unlock` (`pin` form/JSON) binds the same cookie to the active device so a second browser can open the dashboard.
+
+**Companion WebSocket:** `wss://…/companion/v1/` (cookie auth, close `1008` if missing). JSON frames only — this is **not** the XiaoZhi device protocol. See §12.
+
+**Bound / CLI-provisioned:** OTA omits `activation`. `ALLOW_AUTO_PROVISION=false` rejects unknown devices with 403 (no code).
 
 **Do not** put `CONFIG_OTA_URL` into otto-robot `config.json`. Board identity / OTA channel stays `otto-robot`.
 
@@ -285,13 +306,23 @@ After `start`, the device streams binary Opus until `listen/stop`, abort, or `tt
 
 `reason` is omitted unless abort is due to a new wake word (`kAbortReasonWakeWordDetected`). Stop TTS immediately.
 
+#### pong
+
+Optional reply to server JSON `ping`. Old firmware may omit this; the session stays valid either way.
+
+```json
+{ "session_id": "xxx", "type": "pong", "ts_ms": 1710000000000 }
+```
+
+`ts_ms` may echo the ping timestamp. The server treats `pong` as a known type (it is not listen/abort/MCP) and does not require it.
+
 #### mcp
 
 ```json
 { "session_id": "xxx", "type": "mcp", "payload": { "jsonrpc": "2.0", "id": 1, "result": {} } }
 ```
 
-`payload` is a JSON-RPC **response** (or later a notification). See §5.
+`payload` is a JSON-RPC **response** (or a notification). See §5.
 
 WebSocket does **not** send `goodbye`. Closing the socket is enough.
 
@@ -350,6 +381,14 @@ Shows user bubble. Send after ASR of the current utterance.
     "params": { "name": "self.otto.action", "arguments": { "action": "walk", "steps": 1, "speed": 2000, "direction": 1 } }
   }
 }
+```
+
+#### ping
+
+Application keepalive every ~30 s while the WebSocket is open, including during TTS/music. Independent of WebSocket opcode ping.
+
+```json
+{ "session_id": "xxx", "type": "ping" }
 ```
 
 #### system
@@ -438,7 +477,24 @@ Always wrap JSON-RPC in:
 { "session_id": "<from hello>", "type": "mcp", "payload": { } }
 ```
 
-`payload.jsonrpc` **must** be `"2.0"`. `payload.id` **must** be a JSON **number** (not a string). Methods starting with `notifications` are ignored.
+`payload.jsonrpc` **must** be `"2.0"`. Request/response `payload.id` **must** be a JSON **number** (not a string). JSON-RPC notifications have **no** `id`.
+
+Device-initiated methods starting with `notifications/` are handled, not ignored. In particular `notifications/phoe_lone.event` is parsed and logged (`event`: `pickup` | `putdown` | `fall` | `pet` | `bright` | `dark`). The server **must not** send a JSON-RPC reply. Unknown notification methods are logged and dropped. Old firmware that never sends notifications remains valid.
+
+```json
+{
+  "session_id": "xxx",
+  "type": "mcp",
+  "payload": {
+    "jsonrpc": "2.0",
+    "method": "notifications/phoe_lone.event",
+    "params": {
+      "event": "pet",
+      "ts_ms": 1710000000000
+    }
+  }
+}
+```
 
 Device replies are sent with `Protocol::SendMcpMessage` as the same envelope; `payload` is already a JSON-RPC object string.
 
@@ -739,15 +795,17 @@ Returns plain text `"moving"` or `"idle"`.
 
 Empty IP → `{ "ip": "", "connected": false }`.
 
-#### Phoe Lone stubs (always return immediately, no I2C)
+#### Phoe Lone sensors (pull tools)
 
-| Name | Return JSON |
+Firmware may return `wired: false` (stub) or `wired: true` (live MPU6050 / light / touch). The LLM must handle both and must never invent `ax` / lux / touch when `wired:false` or `ok:false`.
+
+| Name | Typical JSON |
 |------|-------------|
-| `self.phoe_lone.imu.get_reading` | `{ "wired": false, "sensor": "MPU6050", "reason": "I2C pins are GPIO_NUM_NC on otto-robot no-camera" }` |
-| `self.phoe_lone.light.get_level` | `{ "wired": false, "sensor": "light", "reason": "no light-sensor GPIO in stock otto-robot config" }` |
-| `self.phoe_lone.touch.get_state` | `{ "wired": false, "sensor": "touch", "reason": "no touch GPIO in stock otto-robot config" }` |
+| `self.phoe_lone.imu.get_reading` | Stub: `{ "wired": false, "sensor": "MPU6050", "reason": "..." }`. Live: `{ "wired": true, "sensor": "MPU6050", "ax", "ay", "az", "gx", "gy", "gz", "pitch", "roll", "temp_c", "event" }` where `event` is `still` \| `moving` \| `pickup` \| `putdown` \| `fall` \| `shake`. I2C fail: `{ "wired": true, "ok": false, "error": "i2c_nack" }`. |
+| `self.phoe_lone.light.get_level` | Stub: `{ "wired": false, ... }`. Live: `{ "wired": true, "lux": 120, "bucket": "indoor", "raw": 1840 }` (`bucket`: `dark` \| `dim` \| `indoor` \| `bright`). |
+| `self.phoe_lone.touch.get_state` | Stub: `{ "wired": false, ... }`. Live: `{ "wired": true, "touched": true, "count": 14, "ms_held": 320 }`. A pet may also arrive as `notifications/phoe_lone.event`. |
 
-The LLM should say the sensor is not wired yet rather than inventing readings.
+If IMU `event` is `fall`, prefer `self.otto.stop`; do not walk.
 
 ---
 
@@ -830,7 +888,37 @@ or a bare JSON-RPC object. MCP replies are broadcast to those clients. Do not co
 
 ---
 
-## 12. Implementation checklist (VPS Python agent)
+## 12. Companion dashboard (browser)
+
+Cloud UI at `https://phoelone.thukha.online/` after activation. The browser never receives the device WebSocket bearer.
+
+**URL:** `wss://phoelone.thukha.online/companion/v1/` (and `/companion/v1`). Cookie `companion` required before `accept`; otherwise close `1008`. Rate limit: `COMPANION_RATE_LIMIT_PER_MINUTE` (default 30).
+
+Do not send these frames to the ESP32. The hub translates them to existing XiaoZhi envelopes on `/xiaozhi/v1/` (`type: mcp`, `type: llm`, `type: tts`).
+
+**Server → browser**
+
+| `type` | Fields |
+|--------|--------|
+| `hello` | `device_id` |
+| `presence` | `online`, `state`, `emotion`, `battery`, `charging`, optional `hint` |
+| `game.state` | `game: rps`, `match_id`, `you`, `mickey`, `winner`, `score`, `best_of`, `phase` |
+| `error` | `code` (`offline` \| `busy` \| `invalid` \| `rate_limited`), `message` |
+
+**Browser → server**
+
+| `type` | Fields |
+|--------|--------|
+| `command.dance` | `action` — allowlist: walk, jump, swing, moonwalk, bend, shake_leg, updown, sit, showcase, home |
+| `command.stop` | none — `self.otto.stop`, abort if speaking |
+| `game.start` | `game: rps`, optional `best_of` (default 3) |
+| `game.move` | `game: rps`, `player`: rock \| paper \| scissors |
+
+If the device session is absent, commands fail with `offline` and presence shows “Wake Mickey (button or wake word), then play.” A dashboard viewer holds the device idle timeout so a silent READY session is not closed mid-game. Game rules run on the server; Gemini is not in this path.
+
+---
+
+## 13. Implementation checklist (VPS Python agent)
 
 1. HTTP `GET`+`POST` `/xiaozhi/ota` and `/xiaozhi/ota/` returning the JSON in §2.3 with this VPS WebSocket URL.
 2. WebSocket `/xiaozhi/v1/` and `/xiaozhi/v1` accepting the headers in §3.1.
@@ -856,10 +944,10 @@ Reference client sources (do not copy cloud servers):
 
 ---
 
-## 13. What this backend must not do
+## 14. What this backend must not do
 
 - Do not require pin changes or a custom board type.
 - Do not send `type: iot` (deprecated).
 - Do not call `self.chassis.*` / `self.dog.*` / `self.electron.*` on Phoe Lone; those belong to other boards.
-- Do not block waiting for IMU/light/touch hardware; stubs already return `wired: false`.
+- Do not block waiting for IMU/light/touch hardware; `wired: false` stubs remain valid.
 - Do not put Python FastAPI sources in this ESP-IDF repository; deploy them on the VPS only.

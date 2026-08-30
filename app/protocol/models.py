@@ -44,6 +44,12 @@ class AbortMessage(ExtraModel):
     reason: str | None = None
 
 
+class PongMessage(ExtraModel):
+    type: Literal["pong"]
+    session_id: str | None = None
+    ts_ms: int | None = None
+
+
 class McpEnvelope(ExtraModel):
     type: Literal["mcp"]
     session_id: str | None = None

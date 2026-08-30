@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f172a">
+  <title>Mickey — Home</title>
+  <style>
+    :root {
+      --bg: #0b1220;
+      --card: #131c31;
+      --ink: #f8fafc;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --accent-2: #34d399;
+      --danger: #fb7185;
+      --line: #243049;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      font-family: ui-rounded, "Segoe UI", system-ui, -apple-system, sans-serif;
+      background:
+        radial-gradient(1200px 600px at 10% -10%, #1d4ed833, transparent 55%),
+        radial-gradient(900px 500px at 110% 10%, #0ea5e933, transparent 50%),
+        var(--bg);
+      color: var(--ink);
+      padding: 20px 16px 32px;
+    }
+    .wrap { width: min(720px, 100%); margin: 0 auto; display: grid; gap: 16px; }
+    header {
+      background: color-mix(in srgb, var(--card) 92%, black);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      padding: 20px 20px 16px;
+      box-shadow: 0 24px 80px #00000066;
+    }
+    .top { display: flex; align-items: center; gap: 12px; }
+    .mark {
+      width: 44px; height: 44px; border-radius: 14px;
+      display: grid; place-items: center;
+      background: linear-gradient(160deg, var(--accent), #6366f1);
+      font-weight: 800;
+    }
+    h1 { font-size: 1.25rem; margin: 0; letter-spacing: -0.03em; }
+    .sub { color: var(--muted); font-size: 0.85rem; margin-top: 2px; }
+    .stats { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+    .pill {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 6px 12px;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    .pill.on { border-color: #34d39966; color: #a7f3d0; background: #064e3b44; }
+    .pill.off { border-color: #fb718544; color: var(--danger); background: #4c051933; }
+    .banner {
+      border-radius: 14px;
+      padding: 12px 14px;
+      margin-top: 14px;
+      font-size: 0.95rem;
+      background: #1e3a5f66;
+      color: #bae6fd;
+      display: none;
+    }
+    .banner.show { display: block; }
+    .banner.err { background: #4c051966; color: var(--danger); }
+    section {
+      background: color-mix(in srgb, var(--card) 92%, black);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      padding: 18px;
+    }
+    h2 { margin: 0 0 12px; font-size: 1.05rem; }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; }
+    button {
+      border: 0;
+      border-radius: 14px;
+      padding: 12px 14px;
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: #042f2e;
+      background: linear-gradient(180deg, #5eead4, var(--accent-2));
+      cursor: pointer;
+    }
+    button.ghost {
+      background: #0b1220;
+      color: var(--ink);
+      border: 1px solid var(--line);
+    }
+    button.stop { background: linear-gradient(180deg, #fda4af, var(--danger)); color: #4c0519; }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; }
+    .score { color: var(--muted); margin: 0 0 12px; }
+    .reveal { min-height: 1.4em; margin: 0 0 12px; color: var(--ink); }
+    .foot { display: flex; justify-content: flex-end; }
+    .foot button { background: transparent; color: var(--muted); font-weight: 600; padding: 8px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="top">
+        <div class="mark">M</div>
+        <div>
+          <h1>Mickey</h1>
+          <div class="sub" id="link-state">Connecting…</div>
+        </div>
+      </div>
+      <div class="stats">
+        <span class="pill off" id="online-pill">Offline</span>
+        <span class="pill" id="battery-pill">Battery —</span>
+        <span class="pill" id="mood-pill">Mood —</span>
+      </div>
+      <div class="banner" id="wake-banner">Wake Mickey (button or wake word), then play.</div>
+      <div class="banner err" id="error-banner"></div>
+    </header>
+
+    <section>
+      <h2>Quick</h2>
+      <div class="row">
+        <button class="stop" id="btn-stop" type="button">Stop</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Dance pad</h2>
+      <div class="grid" id="dance-pad"></div>
+    </section>
+
+    <section>
+      <h2>Rock · Paper · Scissors</h2>
+      <p class="score" id="rps-score">Best of 3 — you 0 · Mickey 0</p>
+      <p class="reveal" id="rps-reveal">Start a match, then throw.</p>
+      <div class="row" style="margin-bottom: 10px">
+        <button type="button" data-throw="rock">Rock</button>
+        <button type="button" data-throw="paper">Paper</button>
+        <button type="button" data-throw="scissors">Scissors</button>
+        <button class="ghost" type="button" id="btn-new">New match</button>
+      </div>
+    </section>
+
+    <div class="foot">
+      <form method="post" action="/companion/logout">
+        <button type="submit">Log out</button>
+      </form>
+    </div>
+  </div>
+  <script>
+    const DANCES = [
+      ["walk", "Walk"],
+      ["jump", "Jump"],
+      ["swing", "Swing"],
+      ["moonwalk", "Moonwalk"],
+      ["bend", "Bend"],
+      ["shake_leg", "Shake"],
+      ["updown", "Up-down"],
+      ["sit", "Sit"],
+      ["showcase", "Showcase"],
+      ["home", "Home"],
+    ];
+    const pad = document.getElementById("dance-pad");
+    DANCES.forEach(([action, label]) => {
+      const btn = document.createElement("button");
+      btn.className = "ghost";
+      btn.type = "button";
+      btn.dataset.dance = action;
+      btn.textContent = label;
+      pad.appendChild(btn);
+    });
+
+    const onlinePill = document.getElementById("online-pill");
+    const batteryPill = document.getElementById("battery-pill");
+    const moodPill = document.getElementById("mood-pill");
+    const wakeBanner = document.getElementById("wake-banner");
+    const errorBanner = document.getElementById("error-banner");
+    const linkState = document.getElementById("link-state");
+    const rpsScore = document.getElementById("rps-score");
+    const rpsReveal = document.getElementById("rps-reveal");
+    const throwButtons = [...document.querySelectorAll("[data-throw]")];
+    const danceButtons = [...document.querySelectorAll("[data-dance]")];
+
+    let socket = null;
+    let online = false;
+    let busy = false;
+    let backoff = 500;
+
+    function showError(message) {
+      if (!message) {
+        errorBanner.classList.remove("show");
+        errorBanner.textContent = "";
+        return;
+      }
+      errorBanner.textContent = message;
+      errorBanner.classList.add("show");
+    }
+
+    function setControls() {
+      danceButtons.forEach((btn) => { btn.disabled = !online || busy; });
+      throwButtons.forEach((btn) => { btn.disabled = !online || busy; });
+    }
+
+    function applyPresence(msg) {
+      online = !!msg.online;
+      onlinePill.textContent = online ? "Online" : "Offline";
+      onlinePill.className = "pill " + (online ? "on" : "off");
+      const battery = msg.battery == null ? "—" : msg.battery + "%" + (msg.charging ? " charging" : "");
+      batteryPill.textContent = "Battery " + battery;
+      moodPill.textContent = "Mood " + (msg.emotion || "—");
+      if (online) wakeBanner.classList.remove("show");
+      else {
+        wakeBanner.textContent = msg.hint || "Wake Mickey (button or wake word), then play.";
+        wakeBanner.classList.add("show");
+      }
+      if (msg.state === "thinking" || msg.state === "speaking") {
+        /* dance allowed while speaking; throws stay gated by server */
+      }
+      setControls();
+    }
+
+    function applyGame(msg) {
+      const you = (msg.score && msg.score.you) || 0;
+      const mickey = (msg.score && msg.score.mickey) || 0;
+      rpsScore.textContent = "Best of " + (msg.best_of || 3) + " — you " + you + " · Mickey " + mickey;
+      if (msg.you && msg.mickey) {
+        const names = { rock: "Rock", paper: "Paper", scissors: "Scissors" };
+        let line = "You " + names[msg.you] + " · Mickey " + names[msg.mickey];
+        if (msg.winner === "player") line += " — you win";
+        else if (msg.winner === "mickey") line += " — Mickey wins";
+        else if (msg.winner === "draw") line += " — draw";
+        if (msg.phase === "match_over") line += ". Match over.";
+        rpsReveal.textContent = line;
+      } else {
+        rpsReveal.textContent = "Match ready. Throw when you are.";
+      }
+    }
+
+    function send(payload) {
+      if (!socket || socket.readyState !== WebSocket.OPEN) return;
+      socket.send(JSON.stringify(payload));
+    }
+
+    function connect() {
+      const proto = location.protocol === "https:" ? "wss" : "ws";
+      socket = new WebSocket(proto + "://" + location.host + "/companion/v1/");
+      socket.onopen = () => {
+        backoff = 500;
+        linkState.textContent = "Companion connected";
+        showError("");
+      };
+      socket.onclose = () => {
+        linkState.textContent = "Reconnecting…";
+        online = false;
+        applyPresence({ online: false });
+        const wait = backoff;
+        backoff = Math.min(backoff * 2, 8000);
+        setTimeout(connect, wait);
+      };
+      socket.onerror = () => {};
+      socket.onmessage = (event) => {
+        let msg;
+        try { msg = JSON.parse(event.data); } catch { return; }
+        if (msg.type === "hello") {
+          linkState.textContent = "Paired";
+        } else if (msg.type === "presence") {
+          applyPresence(msg);
+        } else if (msg.type === "game.state") {
+          applyGame(msg);
+        } else if (msg.type === "error") {
+          showError(msg.message || "Something went wrong.");
+          if (msg.code === "busy") busy = true;
+          if (msg.code === "offline") applyPresence({ online: false, hint: msg.message });
+          setTimeout(() => { busy = false; setControls(); }, 400);
+        }
+      };
+    }
+
+    document.getElementById("btn-stop").addEventListener("click", () => {
+      busy = false;
+      showError("");
+      send({ type: "command.stop" });
+    });
+    document.getElementById("btn-new").addEventListener("click", () => {
+      send({ type: "game.start", game: "rps", best_of: 3 });
+    });
+    danceButtons.forEach((btn) => {
+      btn.addEventListener("click", () => send({ type: "command.dance", action: btn.dataset.dance }));
+    });
+    throwButtons.forEach((btn) => {
+      btn.addEventListener("click", () => send({ type: "game.move", game: "rps", player: btn.dataset.throw }));
+    });
+
+    setControls();
+    connect();
+  </script>
+</body>
+</html>

@@ -47,7 +47,7 @@ def provision(
         typer.echo(f"status={record.status}")
         typer.echo(f"token_version={record.token_version}")
         typer.echo(f"token={token}")
-        typer.echo("Store the token hash only; the plaintext token is shown once.")
+        typer.echo("OTA version checks echo this same token; use `phoe-lone rotate` to replace it.")
 
     asyncio.run(_run())
 

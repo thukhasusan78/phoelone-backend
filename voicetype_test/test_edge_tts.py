@@ -27,12 +27,12 @@ VOICE = "my-MM-NilarNeural"  # female — best cute candidate
 FALLBACK_VOICE = "my-MM-ThihaNeural"  # male
 
 # Prosody (Edge Communicate API). Formats: rate "+8%", pitch "+12Hz", volume "+0%"
-RATE = "+45%"  # production default; try "+12%", "+15%"
+RATE = "+35%"  # production default; try "+12%", "+15%"
 PITCH = "+100Hz"  # production default; try "+20Hz", "+28Hz", "+36Hz"
 VOLUME = "+100%"
 
 # Sample Burmese line (same as Gemini script for A/B listening)
-TEXT = "မင်္ဂလာပါ။ ကျွန်တော် ဖိုးလုန်း ပါ။"
+TEXT = "ကျနော့်ကိုအသက်သွင်းဖို့ အောက်မှာပေးထားတဲ့ website ကိုသွားပြီး verification code လေးရိုက်ထည့်ပေးပါဗျ"
 
 # If non-empty, run every preset instead of the single VOICE/RATE/PITCH above.
 # Comment out or set to [] to use only the knobs above.
@@ -45,7 +45,7 @@ PRESETS: list[dict[str, str]] = [
 ]
 
 OUTPUT_DIR = Path(__file__).resolve().parent / "outputs"
-ESP32_SAMPLE_RATE = 24000  # matches app downlink (Opus 24 kHz)
+ESP32_SAMPLE_RATE = 16000  # ESP32 OGG: Opus 16 kHz mono, 16 kbps, 60 ms frames
 
 # =============================================================================
 
@@ -73,8 +73,8 @@ async def synthesize_mp3(
     return b"".join(chunks)
 
 
-def mp3_to_wav24k(mp3_path: Path, wav_path: Path) -> bool:
-    """Convert MP3 → 24 kHz mono PCM WAV if ffmpeg is available."""
+def mp3_to_esp32_ogg(mp3_path: Path, ogg_path: Path) -> bool:
+    """Convert MP3 → ESP32-compatible Opus OGG if ffmpeg is available."""
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         return False
@@ -84,13 +84,17 @@ def mp3_to_wav24k(mp3_path: Path, wav_path: Path) -> bool:
             "-y",
             "-i",
             str(mp3_path),
+            "-c:a",
+            "libopus",
+            "-b:a",
+            "16k",
             "-ac",
             "1",
             "-ar",
-            str(ESP32_SAMPLE_RATE),
-            "-sample_fmt",
-            "s16",
-            str(wav_path),
+            "16000",
+            "-frame_duration",
+            "60",
+            str(ogg_path),
         ],
         check=True,
         capture_output=True,
@@ -149,12 +153,15 @@ async def run_one(
     mp3_path.write_bytes(mp3)
     print(f"  wrote {mp3_path} ({len(mp3)} bytes, voice={used_voice})")
 
-    wav_path = mp3_path.with_suffix(".wav")
+    ogg_path = mp3_path.with_suffix(".ogg")
     try:
-        if mp3_to_wav24k(mp3_path, wav_path):
-            print(f"  wrote {wav_path} ({ESP32_SAMPLE_RATE} Hz mono)")
+        if mp3_to_esp32_ogg(mp3_path, ogg_path):
+            print(
+                f"  wrote {ogg_path} "
+                f"(Opus {ESP32_SAMPLE_RATE} Hz mono, 16 kbps, 60 ms frames)"
+            )
             if play:
-                try_play(wav_path)
+                try_play(ogg_path)
         elif play:
             try_play(mp3_path)
     except subprocess.CalledProcessError as exc:

@@ -63,7 +63,8 @@ def test_sanitize_preserves_fallback() -> None:
 
 def test_sanitize_rewrites_latin_robot_name() -> None:
     raw = "မင်္ဂလာပါ! Phoe Lone ပါ။ ဘာလုပ်ပေးရမလဲ?"
-    assert sanitize_for_tts(raw) == "မင်္ဂလာပါ! ဖိုးလုန်း ပါ။ ဘာလုပ်ပေးရမလဲ?"
+    assert sanitize_for_tts(raw) == "မင်္ဂလာပါ! Mickey ပါ။ ဘာလုပ်ပေးရမလဲ?"
+    assert sanitize_for_tts("ကျွန်တော် ဖိုးလုန်း ပါ။") == "ကျွန်တော် Mickey ပါ။"
 
 
 def test_sanitize_strips_tool_json_before_speech() -> None:
@@ -71,8 +72,8 @@ def test_sanitize_strips_tool_json_before_speech() -> None:
         '{"ok": true, "action": "swing", "amount": null, "direction": null, '
         '"speed": 500, "steps": 5}ဖိုးလုန်း ကပြနေမယ်နော်။'
     )
-    assert sanitize_for_tts(raw) == "ဖိုးလုန်း ကပြနေမယ်နော်။"
+    assert sanitize_for_tts(raw) == "Mickey ကပြနေမယ်နော်။"
     leaked = '"ok": true, "action": "swing", "amount": null ဖိုးလုန်း ကပြနေမယ်နော်။'
-    assert sanitize_for_tts(leaked) == "ဖိုးလုန်း ကပြနေမယ်နော်။"
+    assert sanitize_for_tts(leaked) == "Mickey ကပြနေမယ်နော်။"
     assert "ok" not in sanitize_for_tts(raw).casefold()
     assert "swing" not in sanitize_for_tts(raw).casefold()

@@ -4,6 +4,7 @@ from typing import Any
 
 from app.mcp.catalog import (
     LLM_TOOLS,
+    MICKEY_DEVICE_TOOLS,
     PHOE_LONE_FALLBACK_NAMES,
     USER_ONLY_TOOLS,
     catalog_entry,
@@ -102,4 +103,9 @@ def enrich_discovered_tools(discovered: list[dict[str, Any]]) -> list[dict[str, 
     if has_otto and "self.otto.stop" not in seen:
         stop = by_name.get("self.otto.stop") or LLM_TOOLS["self.otto.stop"]
         enriched.append(_merge_catalog(stop))
+        seen.add("self.otto.stop")
+    for name in MICKEY_DEVICE_TOOLS:
+        if name not in seen and name in LLM_TOOLS:
+            enriched.append(_merge_catalog({"name": name, **LLM_TOOLS[name]}))
+            seen.add(name)
     return enriched

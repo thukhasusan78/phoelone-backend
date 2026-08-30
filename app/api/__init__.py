@@ -1,3 +1,3 @@
-from app.api import health, ota, vision, websocket
+from app.api import companion, health, ota, portal, vision, websocket
 
-__all__ = ["health", "ota", "vision", "websocket"]
+__all__ = ["companion", "health", "ota", "portal", "vision", "websocket"]

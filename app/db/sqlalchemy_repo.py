@@ -3,10 +3,15 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from sqlalchemy import DateTime, Integer, String, UniqueConstraint, select, update
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from app.db.models import DeviceRecord, DeviceRepository
+from app.db.models import DeviceRecord
 
 
 class Base(DeclarativeBase):
@@ -28,6 +33,12 @@ class DeviceRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_user_agent: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    activation_code: Mapped[str | None] = mapped_column(String(8), nullable=True, index=True)
+    activation_challenge: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    activation_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    token_ciphertext: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
 
 class AuditRow(Base):
@@ -61,6 +72,10 @@ def _to_record(row: DeviceRow) -> DeviceRecord:
         created_at=row.created_at,
         last_seen_at=row.last_seen_at,
         last_user_agent=row.last_user_agent,
+        activation_code=row.activation_code,
+        activation_challenge=row.activation_challenge,
+        activation_expires_at=row.activation_expires_at,
+        token_ciphertext=row.token_ciphertext,
     )
 
 
@@ -100,6 +115,10 @@ class PostgresDeviceRepository:
                     created_at=record.created_at,
                     last_seen_at=record.last_seen_at,
                     last_user_agent=record.last_user_agent,
+                    activation_code=record.activation_code,
+                    activation_challenge=record.activation_challenge,
+                    activation_expires_at=record.activation_expires_at,
+                    token_ciphertext=record.token_ciphertext,
                 )
                 session.add(row)
             else:
@@ -110,6 +129,10 @@ class PostgresDeviceRepository:
                 row.token_version = record.token_version
                 row.last_seen_at = record.last_seen_at
                 row.last_user_agent = record.last_user_agent
+                row.activation_code = record.activation_code
+                row.activation_challenge = record.activation_challenge
+                row.activation_expires_at = record.activation_expires_at
+                row.token_ciphertext = record.token_ciphertext
             await session.commit()
             await session.refresh(row)
             return _to_record(row)
@@ -145,3 +168,16 @@ class PostgresDeviceRepository:
                 .values(**values)
             )
             await session.commit()
+
+    async def get_by_activation_code(self, code: str) -> DeviceRecord | None:
+        if not code:
+            return None
+        async with self._factory() as session:
+            result = await session.execute(
+                select(DeviceRow).where(
+                    DeviceRow.activation_code == code,
+                    DeviceRow.status == "pending",
+                )
+            )
+            row = result.scalar_one_or_none()
+            return _to_record(row) if row else None

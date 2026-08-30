@@ -34,10 +34,18 @@ class DeviceRecord:
     last_seen_at: datetime | None
     last_user_agent: str | None = None
     id: int | None = None
+    activation_code: str | None = None
+    activation_challenge: str | None = None
+    activation_expires_at: datetime | None = None
+    token_ciphertext: str | None = None
 
     @property
     def is_active(self) -> bool:
         return self.status == "active"
+
+    @property
+    def is_pending(self) -> bool:
+        return self.status == "pending"
 
 
 class DeviceRepository(Protocol):
@@ -56,3 +64,5 @@ class DeviceRepository(Protocol):
         *,
         user_agent: str | None = None,
     ) -> None: ...
+
+    async def get_by_activation_code(self, code: str) -> DeviceRecord | None: ...

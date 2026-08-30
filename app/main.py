@@ -9,7 +9,7 @@ from redis.asyncio import Redis
 
 from app.ai.gemini import GeminiLiveBrain, KeyPool
 from app.ai.tool_router import ToolRouter
-from app.api import health, ota, vision, websocket
+from app.api import companion, health, ota, portal, vision, websocket
 from app.audio.edge_tts import EdgeTtsClient
 from app.audio.opus import ffmpeg_available
 from app.auth.service import AuthService
@@ -49,6 +49,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.session_factory = factory
     app.state.auth = AuthService(repo, settings)
     app.state.sessions = SessionManager(settings)
+    from app.companion.hub import CompanionHub
+
+    app.state.companion = CompanionHub(app.state.sessions)
     app.state.key_pool = KeyPool(settings.gemini_keys)
     app.state.tts = EdgeTtsClient(settings)
     app.state.brain_factory = lambda: GeminiLiveBrain(settings, app.state.key_pool)
@@ -108,6 +111,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     application.state.settings = settings
     application.include_router(health.router)
+    application.include_router(portal.router)
+    application.include_router(companion.router)
     application.include_router(ota.router)
     application.include_router(vision.router)
     application.include_router(websocket.router)

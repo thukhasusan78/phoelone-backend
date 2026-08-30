@@ -45,3 +45,11 @@ class InMemoryDeviceRepository:
         row.last_seen_at = datetime.now(timezone.utc)
         if user_agent is not None:
             row.last_user_agent = user_agent[:256]
+
+    async def get_by_activation_code(self, code: str) -> DeviceRecord | None:
+        if not code:
+            return None
+        for row in self._rows.values():
+            if row.activation_code == code and row.status == "pending":
+                return row
+        return None

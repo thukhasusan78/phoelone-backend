@@ -22,9 +22,10 @@ _EMOJI_RE = re.compile(
     "]+"
 )
 _SPEAKABLE_PUNCT = set("။၊.,!?…:;、-—'\"()[] \t")
-# Gemini often inserts the Latin robot name; keep it speakable in Burmese.
+# Gemini may still leak the old Latin/Burmese robot name; speak Mickey.
 _LATIN_NAME_RE = re.compile(r"\b(?:phoe|pho|foe)\s*[-_]?lone\b", re.IGNORECASE)
-_BURMESE_NAME = "ဖိုးလုန်း"
+_OLD_BURMESE_NAME_RE = re.compile(r"ဖိုးလုန်း")
+_SPOKEN_NAME = "Mickey"
 # Gemini often prepends tool-result JSON to the spoken sentence.
 _JSON_OBJECT_RE = re.compile(r"\{[^{}]*\}")
 _JSON_KV_RE = re.compile(
@@ -52,7 +53,8 @@ def sanitize_for_tts(text: str | None) -> str:
         return ""
     cleaned = unicodedata.normalize("NFKC", text)
     cleaned = _strip_json_payloads(cleaned)
-    cleaned = _LATIN_NAME_RE.sub(_BURMESE_NAME, cleaned)
+    cleaned = _LATIN_NAME_RE.sub(_SPOKEN_NAME, cleaned)
+    cleaned = _OLD_BURMESE_NAME_RE.sub(_SPOKEN_NAME, cleaned)
     cleaned = _TAG_RE.sub(" ", cleaned)
     cleaned = _UNCLOSED_TAG_RE.sub(" ", cleaned)
     cleaned = _MARKDOWN_RE.sub(" ", cleaned)

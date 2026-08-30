@@ -31,22 +31,30 @@ REQUIRED_DEVICE_TOOLS = {
     "self.phoe_lone.imu.get_reading",
     "self.phoe_lone.light.get_level",
     "self.phoe_lone.touch.get_state",
+    "self.mickey.alarm.set",
+    "self.mickey.alarm.get",
+    "self.mickey.alarm.cancel",
+    "self.mickey.sleep.now",
 }
 
 
 def test_system_prompt_is_english() -> None:
-    assert "Phoe Lone" in SYSTEM_PROMPT
+    assert "You are Mickey" in SYSTEM_PROMPT
     assert "Always answer in natural, concise Burmese" in SYSTEM_PROMPT
     assert "MUST reply primarily in standard Burmese Unicode" in SYSTEM_PROMPT
     assert "empty string" in SYSTEM_PROMPT
     assert "<ctrl46>" in SYSTEM_PROMPT
-    spoken_name = "Your spoken name is ဖိုးလုန်း."
+    spoken_name = "Your spoken name is Mickey."
     assert spoken_name in SYSTEM_PROMPT
-    without_name = SYSTEM_PROMPT.replace(spoken_name, "Your spoken name is Phoe Lone.")
-    assert MYANMAR.search(without_name) is None
+    assert "Never say you are Phoe Lone" in SYSTEM_PROMPT
+    assert MYANMAR.search(SYSTEM_PROMPT) is None
     for name in (
         "self.otto.action",
         "self.otto.stop",
+        "self.mickey.alarm.set",
+        "self.mickey.alarm.get",
+        "self.mickey.alarm.cancel",
+        "self.mickey.sleep.now",
         "search_weather",
         "search_news",
         "search_music",
@@ -127,6 +135,51 @@ def test_router_exposes_host_and_device_tools() -> None:
     assert "self.online_music.play_music" not in names
     for decl in decls:
         assert MYANMAR.search(decl["description"]) is None
+
+
+def test_sensor_catalog_is_dual_fleet() -> None:
+    imu = LLM_TOOLS["self.phoe_lone.imu.get_reading"]["description"]
+    light = LLM_TOOLS["self.phoe_lone.light.get_level"]["description"]
+    touch = LLM_TOOLS["self.phoe_lone.touch.get_state"]["description"]
+    for text in (imu, light, touch, SYSTEM_PROMPT):
+        assert "wired:true" in text
+        assert "wired:false" in text
+        assert "unwired stubs" not in text
+    assert "never invent" in imu.lower() or "Never invent" in imu
+    assert "lux" in light
+    assert "notification" in touch
+    assert "self.otto.stop" in imu
+    assert "do not walk" in imu.lower() or "do not walk" in SYSTEM_PROMPT.lower()
+    assert "unwired stubs" not in SYSTEM_PROMPT
+    assert "ok:false" in SYSTEM_PROMPT
+    assert "fall" in SYSTEM_PROMPT.lower()
+
+
+def test_mickey_alarm_catalog_and_prompt() -> None:
+    setter = LLM_TOOLS["self.mickey.alarm.set"]
+    props = setter["inputSchema"]["properties"]
+    assert setter["inputSchema"]["required"] == ["hour", "minute"]
+    assert {"hour", "minute", "repeat", "sleep_now"} <= set(props)
+    assert "7:00 AM" in setter["description"] or "hour=7" in SYSTEM_PROMPT
+    assert "self.mickey.sleep.now" in SYSTEM_PROMPT
+    assert "handle_exit_intent" in SYSTEM_PROMPT
+    assert "good night" in SYSTEM_PROMPT.lower()
+    tools = enrich_discovered_tools(
+        [
+            {
+                "name": "self.otto.stop",
+                "description": "stop",
+                "inputSchema": {"type": "object", "properties": {}},
+            }
+        ]
+    )
+    names = {t["name"] for t in tools}
+    assert {
+        "self.mickey.alarm.set",
+        "self.mickey.alarm.get",
+        "self.mickey.alarm.cancel",
+        "self.mickey.sleep.now",
+    } <= names
 
 
 def test_discovered_device_music_tools_are_hidden_from_gemini() -> None:

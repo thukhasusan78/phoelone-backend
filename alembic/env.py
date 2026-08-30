@@ -13,8 +13,13 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 settings = get_settings()
-if not settings.uses_memory_db:
-    config.set_main_option("sqlalchemy.url", settings.database_url)
+if settings.uses_memory_db:
+    raise RuntimeError(
+        "DATABASE_URL is memory:// so Alembic has nowhere to migrate. "
+        "Set DATABASE_URL=postgresql+asyncpg://phoe:PASSWORD@127.0.0.1:5432/phoe_lone "
+        "in .env (native) or let Docker Compose inject the postgres hostname."
+    )
+config.set_main_option("sqlalchemy.url", settings.database_url)
 
 target_metadata = Base.metadata
 

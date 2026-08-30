@@ -17,7 +17,7 @@ ESP32  --WS--->  DeviceSession
                    └─ Device MCP (walk, stop, volume, face, …)
 ```
 
-1. **Auth:** opaque WebSocket tokens after OTA. Identity is `Device-Id` + `Client-Id` + bearer over TLS (not hardware attestation).
+1. **Auth:** opaque WebSocket tokens after OTA. Unknown devices get a 6-digit activation code (portal at `/`) and cannot open WebSocket until bound. Identity is `Device-Id` + `Client-Id` + bearer over TLS. A successful activate sets a signed `companion` cookie and opens the dashboard (presence, dance pad, Rock-Paper-Scissors). The browser talks `wss://…/companion/v1/`; it never sees the device bearer. Mickey must be awake (device `/xiaozhi/v1/` open) for body reactions. Optional `COMPANION_PIN` unlocks the dashboard from another browser.
 2. **Server Silero VAD:** in auto/wake-word mode the ESP32 often does **not** send `listen/stop`. The server endpoints on non-speech (`VAD_MIN_SILENCE_MS`, default 800 ms) or `MAX_FORWARDED_AUDIO_SECONDS`, then sends `tts/start` so the device leaves listening.
 3. **Gemini Live** (`gemini-3.1-flash-live-preview`): gated 16 kHz PCM with manual `activity_start` / `activity_end`. Native response audio is discarded; output transcription is Burmese Unicode only.
 4. **Edge TTS:** `my-MM-NilarNeural` (fallback Thiha). Downlink Opus is paced (5-frame burst, then 60 ms/frame) so the ESP32 1.2 s decode queue does not drop mid-sentence audio.
@@ -36,7 +36,9 @@ pytest
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Point firmware `CONFIG_OTA_URL` at `http://<this-host>:8000/xiaozhi/ota/`.
+Point firmware `CONFIG_OTA_URL` at `https://phoelone.thukha.online/xiaozhi/ota/`.
+
+New robots POST OTA, show a 6-digit code, and stay pending until that code is entered at [https://phoelone.thukha.online/](https://phoelone.thukha.online/). WebSocket is rejected until then.
 
 ## Local music
 
@@ -56,39 +58,40 @@ Do not commit the audio files. Keep `data/local_music/.gitkeep`.
 - Uplink: raw Opus, 16 kHz, mono, 60 ms. Downlink: Opus, 24 kHz, mono, 60 ms, only after `tts/start`.
 - VAD: `VAD_BACKEND`, `VAD_SPEECH_THRESHOLD`, `VAD_MIN_SPEECH_MS`, `VAD_MIN_SILENCE_MS`, `VAD_PREROLL_CHUNKS`, `MAX_FORWARDED_AUDIO_SECONDS`.
 
-Pre-provision devices, rotate tokens, and keep `ALLOW_AUTO_PROVISION=false` in production.
+Pre-provision with `phoe-lone provision` if you disable auto-activation. With `ALLOW_AUTO_PROVISION=true`, unknown robots get a 6-digit code at https://phoelone.thukha.online/.
 
-## Production (DigitalOcean)
+## Production (this VPS: native systemd)
 
-Compose stack: Caddy (80/443 TLS) → FastAPI; PostgreSQL and Redis on the private network only.
+**Architecture (chosen):** PostgreSQL + Redis + Caddy + a **single** uvicorn worker, all on the host via systemd. Docker is **not** used here: the droplet is 1 vCPU / 2 GB, Compose is not installed, and in-memory WebSocket sessions cannot be multi-process anyway.
 
-1. Droplet (2 vCPU / 2 GB or larger), domain A record, Docker + Compose.
-2. Clone, copy `.env.example` to `.env`, set:
-   - `DOMAIN`, `ACME_EMAIL`
-   - `PUBLIC_HTTP_ORIGIN=https://<domain>`
-   - `PUBLIC_WS_ORIGIN=wss://<domain>`
-   - `DATABASE_URL` / `POSTGRES_PASSWORD`
-   - `AUTH_PEPPER` (long random)
-   - `GEMINI_API_KEYS`
-   - `TAVILY_KEY` (optional)
-   - `ALLOW_AUTO_PROVISION=false`
-   - `METRICS_TOKEN`
-   - `MUSIC_LOCAL_DIR=data/local_music`, `MUSIC_MAX_SECONDS=0`
-3. `docker compose run --rm migrate` then `docker compose up -d`
-4. Provision each robot:
+Do **not** run `alembic` against hostname `postgres` on the host — that name exists only on a Compose network. Native migrations read `DATABASE_URL` from `.env` (`127.0.0.1`).
+
+**Swap:** keep the existing **2 GB** `/swapfile`. Do not add a second swap file. `vm.swappiness=10` so the kernel prefers RAM until it is actually tight (TTS/ffmpeg spikes can still use swap).
+
+1. DNS A record `phoelone.thukha.online` → this droplet.
+2. `.env` (never commit it):
+   - `ENVIRONMENT=production`
+   - `HOST=127.0.0.1` (uvicorn is loopback-only; Caddy owns 80/443)
+   - `DATABASE_URL=postgresql+asyncpg://phoe:<password>@127.0.0.1:5432/phoe_lone`
+   - `REDIS_URL=redis://127.0.0.1:6379/0`
+   - `PUBLIC_HTTP_ORIGIN=https://phoelone.thukha.online`
+   - `PUBLIC_WS_ORIGIN=wss://phoelone.thukha.online`
+   - `AUTH_PEPPER`, `POSTGRES_PASSWORD`, `ACME_EMAIL`, `GEMINI_API_KEYS`
+   - `ALLOW_AUTO_PROVISION=true`
+   - `MAX_CONCURRENT_SESSIONS=4`
+3. Install/start: `postgresql`, `redis-server`, `caddy`, unit `phoe-lone.service`.
+4. Migrate: `scripts/migrate.sh` (venv Alembic → localhost Postgres).
+5. Activate robots at `https://phoelone.thukha.online/` or:
 
 ```bash
-docker compose exec api phoe-lone provision \
-  --device-id aa:bb:cc:dd:ee:ff \
-  --client-id <nvs-uuid>
+cd /root/phoe_lone_server
+.venv/bin/phoe-lone provision --device-id aa:bb:cc:dd:ee:ff --client-id <nvs-uuid>
 ```
 
-5. Device NVS: **only** `CONFIG_OTA_URL` / `wifi.ota_url` = `https://<domain>/xiaozhi/ota/`.
+6. Firmware `CONFIG_OTA_URL` = `https://phoelone.thukha.online/xiaozhi/ota/`.
 
-Firmware dummy URL returns 404 (`FIRMWARE_VERSION=0.0.0`) so the robot skips upgrades.
+**Ops:** `systemctl status phoe-lone caddy postgresql redis-server`. Logs: `journalctl -u phoe-lone -f`. Health: `curl -fsS https://phoelone.thukha.online/health`. After editing `Caddyfile`: `scripts/reload-caddy.sh`. Backups: `scripts/backup.sh` (also nightly cron 03:15 UTC). Firewall: UFW allows 22/80/443 only; uvicorn is loopback.
 
-**Ops:** `GET /health`, `GET /ready`, `GET /metrics` (Bearer `$METRICS_TOKEN`). Logs: `docker compose logs -f api`. Backups: `scripts/backup.sh`. Token rotate / disable: `phoe-lone rotate` / `phoe-lone disable`. Firewall: 22, 80, 443 only.
+**Smoke:** hello within 10 s; Burmese STT then TTS; walk / stop; weather; local mp3 playback; abort cuts TTS.
 
-**Smoke:** hello within 10 s; Burmese STT then TTS; walk / stop; weather; drop an mp3 in `data/local_music/` and say “play a song” (full length); abort cuts TTS; idle pings keep the 120 s device timeout from firing.
-
-Resource limits are in `compose.yaml`. Redis uses `allkeys-lru` at 128 MB.
+Optional Docker Compose remains in `compose.yaml` for a larger host only (`API_UPSTREAM=api:8000`). Do not run Compose and systemd uvicorn at the same time.

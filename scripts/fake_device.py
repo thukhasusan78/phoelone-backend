@@ -37,6 +37,13 @@ def main() -> None:
     body = response.json()
     ws_url = body["websocket"]["url"]
     token = body["websocket"]["token"]
+    activation = body.get("activation") or {}
+    code = activation.get("code")
+    if code:
+        portal = args.ota.split("/xiaozhi/")[0].rstrip("/") + "/activate"
+        bound = httpx.post(portal, json={"code": code}, timeout=10)
+        bound.raise_for_status()
+        print("activated", code)
     print("ota websocket", ws_url)
     extra = {
         "Authorization": f"Bearer {token}",

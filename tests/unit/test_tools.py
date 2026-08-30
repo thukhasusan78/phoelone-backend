@@ -232,6 +232,8 @@ async def test_router_unknown_device_tool() -> None:
 def test_canonical_tool_name_adds_self_prefix() -> None:
     assert canonical_tool_name("otto.action") == "self.otto.action"
     assert canonical_tool_name("self.otto.action") == "self.otto.action"
+    assert canonical_tool_name("mickey.alarm.set") == "self.mickey.alarm.set"
+    assert canonical_tool_name("self.mickey.sleep.now") == "self.mickey.sleep.now"
     assert canonical_tool_name("search_music") == "search_music"
 
 

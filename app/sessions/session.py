@@ -34,6 +34,10 @@ from app.audio.opus import (
 from app.audio.pacer import pace_opus_frames, pace_opus_stream
 from app.audio.speech_gate import create_speech_gate
 from app.audio.text import FALLBACK_BURMESE, cap_text, chunk_burmese, sanitize_for_tts
+from app.companion.errors import CompanionError
+from app.companion.hub import WAKE_HINT, device_idle_exempt
+from app.companion.reactions import dance_payload, rps_plan, rps_think_motion
+from app.companion.status import parse_battery_reading
 from app.config import Settings
 from app.mcp.client import McpClient, McpError
 from app.observability.logging import get_logger
@@ -53,6 +57,7 @@ from app.protocol.models import (
     DeviceHello,
     ListenMessage,
     McpEnvelope,
+    PongMessage,
 )
 from app.protocol.state import SessionState, StateMachine
 from app.tools.http import HttpGuardError, assert_public_https
@@ -73,6 +78,12 @@ from app.tools.otto_gate import (
 )
 
 log = get_logger(__name__)
+
+_MUSIC_DONE_BURMESE = "သီချင်း ပြီးသွားပါပြီနော်။"
+
+_SENSOR_EVENTS = frozenset({"pickup", "putdown", "fall", "pet", "bright", "dark"})
+_SENSOR_MIN_INTERVAL_S = 0.5
+_FALL_INHIBIT_S = 5.0
 
 # Uplink Opus frame is 60 ms @ 16 kHz mono PCM16.
 _UPLINK_FRAME_SECONDS = 0.06
@@ -202,6 +213,7 @@ class DeviceSession:
         self.state = StateMachine()
         self.codec = create_codec()
         self.mcp = McpClient(self.session_id, self._queue_json, timeout_s=settings.mcp_timeout_s)
+        self.mcp.set_notification_handler(self._on_mcp_notification)
         self.brain: Brain | None = None
         self.out_queue: asyncio.Queue[Outbound | None] = asyncio.Queue(settings.outbound_queue_size)
         self._writer_task: asyncio.Task | None = None
@@ -228,6 +240,13 @@ class DeviceSession:
         self._uplink_ignored_logged = False
         self._tts_played = False
         self._pending_music: PendingMusic | None = None
+        self._last_pong_monotonic = 0.0
+        self._motion_inhibited_until = 0.0
+        self._sensor_event_last: dict[str, float] = {}
+        self._companion_lock = asyncio.Lock()
+        self._battery: int | None = None
+        self._charging: bool | None = None
+        self._status_at = 0.0
 
     def _tool_context(self, user_text: str | None = None) -> dict[str, Any]:
         ctx: dict[str, Any] = {}
@@ -342,6 +361,7 @@ class DeviceSession:
             except Exception:  # noqa: BLE001
                 pass
         SESSIONS_ACTIVE.dec()
+        await self._notify_companion_presence(offline=True)
 
     async def _handshake(self) -> None:
         try:
@@ -380,6 +400,7 @@ class DeviceSession:
             device_city=getattr(self.device_location, "city", None),
             wifi_ssid=getattr(self.device_location, "ssid", None),
         )
+        await self._notify_companion_presence()
 
     async def _discover_mcp(self) -> None:
         try:
@@ -440,6 +461,12 @@ class DeviceSession:
             except ValidationError:
                 return
             await self._abort(reason=msg.reason)
+        elif msg_type == "pong":
+            try:
+                PongMessage.model_validate(data)
+            except ValidationError:
+                return
+            self._last_pong_monotonic = time.monotonic()
         elif msg_type == "mcp":
             try:
                 msg = McpEnvelope.model_validate(data)
@@ -448,6 +475,42 @@ class DeviceSession:
             self.mcp.on_message(msg.payload)
         else:
             log.info("session.unknown_type", type=msg_type)
+
+    def _on_mcp_notification(self, payload: dict[str, Any]) -> None:
+        method = payload.get("method")
+        if method != "notifications/phoe_lone.event":
+            log.info(
+                "session.mcp_notification_ignored",
+                method=method,
+                device_id=self.device_id,
+                session_id=self.session_id,
+            )
+            return
+        params = payload.get("params")
+        if not isinstance(params, dict):
+            return
+        self._on_sensor_event(params)
+
+    def _on_sensor_event(self, params: dict[str, Any]) -> None:
+        event = params.get("event")
+        if not isinstance(event, str) or event not in _SENSOR_EVENTS:
+            return
+        now = time.monotonic()
+        last = self._sensor_event_last.get(event, 0.0)
+        if now - last < _SENSOR_MIN_INTERVAL_S:
+            return
+        self._sensor_event_last[event] = now
+        log.info(
+            "session.phoe_lone_event",
+            device_id=self.device_id,
+            sensor_event=event,
+            session_id=self.session_id,
+        )
+        if event == "fall":
+            self._motion_inhibited_until = now + _FALL_INHIBIT_S
+            return
+        if self.state.state == SessionState.SPEAKING:
+            return
 
     async def _on_listen(self, msg: ListenMessage) -> None:
         if msg.state == "start":
@@ -891,6 +954,31 @@ class DeviceSession:
                 return result
             tool_name = canonical_tool_name(call.name)
             if tool_name in OTTO_MOTION_TOOLS:
+                if (
+                    tool_name != "self.otto.stop"
+                    and time.monotonic() < self._motion_inhibited_until
+                ):
+                    log.info(
+                        "session.otto_gated",
+                        session_id=self.session_id,
+                        name=tool_name,
+                        user_text=user_text or None,
+                        reason="fall_inhibit",
+                    )
+                    payload = {
+                        "ok": False,
+                        "skipped": True,
+                        "reason": "fall_inhibit",
+                        "note": "Ignored: motion inhibited after a fall.",
+                    }
+                    responses.append(
+                        {
+                            "name": call.name,
+                            "call_id": call.call_id,
+                            "response": self.router.as_function_response(payload),
+                        }
+                    )
+                    continue
                 if tool_name == "self.otto.stop" and not looks_like_noise_utterance(user_text):
                     # Only probe status when STT is non-empty but stop-intent is unclear.
                     if device_moving is None and not should_dispatch_otto_tool(
@@ -966,6 +1054,127 @@ class DeviceSession:
 
     async def _set_emotion(self, emotion: str) -> None:
         self._emotion = emotion if emotion in KNOWN_EMOTIONS else "neutral"
+
+    @property
+    def closed(self) -> bool:
+        return self._closed
+
+    def _companion_hub(self):
+        try:
+            return getattr(self.ws.app.state, "companion", None)
+        except Exception:  # noqa: BLE001
+            return None
+
+    async def _notify_companion_presence(self, *, offline: bool = False) -> None:
+        hub = self._companion_hub()
+        if hub is None:
+            return
+        try:
+            await hub.push_presence(self.device_id, offline=offline)
+        except Exception as exc:  # noqa: BLE001
+            log.info("companion.presence_notify_failed", error=str(exc), session_id=self.session_id)
+
+    def presence_snapshot(self) -> dict[str, Any]:
+        online = not self._closed
+        payload: dict[str, Any] = {
+            "type": "presence",
+            "online": online,
+            "state": None if not online else self.state.state.value,
+            "emotion": None if not online else self._emotion,
+            "battery": self._battery,
+            "charging": self._charging,
+        }
+        if not online:
+            payload["hint"] = WAKE_HINT
+        return payload
+
+    async def refresh_status(self) -> None:
+        if self._closed:
+            return
+        if self._status_at and time.monotonic() - self._status_at < 15.0:
+            return
+        text = ""
+        try:
+            if "self.battery.get_level" in self.mcp.tool_by_name:
+                text = await self.mcp.call("self.battery.get_level", {})
+            elif "self.get_device_status" in self.mcp.tool_by_name:
+                text = await self.mcp.call("self.get_device_status", {})
+        except (McpError, Exception) as exc:  # noqa: BLE001
+            log.info("session.status_refresh_failed", session_id=self.session_id, error=str(exc))
+            return
+        if not text:
+            return
+        level, charging = parse_battery_reading(text)
+        if level is not None:
+            self._battery = level
+        if charging is not None:
+            self._charging = charging
+        self._status_at = time.monotonic()
+
+    async def companion_action(
+        self, kind: str, args: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        if self._closed:
+            raise CompanionError("offline", "Mickey is offline.")
+        payload = args or {}
+        async with self._companion_lock:
+            if kind == "stop":
+                return await self._companion_stop()
+            if kind == "dance":
+                return await self._companion_dance(payload)
+            if kind == "rps_react":
+                return await self._companion_rps_react(payload)
+            raise CompanionError("invalid", "Unknown companion command.")
+
+    def _motion_inhibited(self) -> bool:
+        return time.monotonic() < self._motion_inhibited_until
+
+    async def _apply_emotion(self, emotion: str) -> None:
+        await self._set_emotion(emotion)
+        await self._queue_json(llm_emotion(self.session_id, self._emotion))
+
+    async def _companion_stop(self) -> dict[str, Any]:
+        try:
+            await self.mcp.call("self.otto.stop", {})
+        except (McpError, Exception) as exc:  # noqa: BLE001
+            log.info("companion.stop_mcp_failed", session_id=self.session_id, error=str(exc))
+        if self.state.state == SessionState.SPEAKING:
+            await self._abort(reason="companion_stop")
+        return {"ok": True}
+
+    async def _companion_dance(self, args: dict[str, Any]) -> dict[str, Any]:
+        if self.state.state == SessionState.THINKING:
+            raise CompanionError("busy", "Mickey is thinking.")
+        action = str(args.get("action") or "")
+        motion = dance_payload(action)
+        if self._motion_inhibited():
+            return {"ok": True, "skipped": True, "reason": "fall_inhibit"}
+        await self._apply_emotion("happy")
+        try:
+            await self.mcp.call("self.otto.action", motion)
+        except McpError as exc:
+            raise CompanionError("invalid", str(exc)) from exc
+        return {"ok": True}
+
+    async def _companion_rps_react(self, args: dict[str, Any]) -> dict[str, Any]:
+        if self.state.state in {SessionState.THINKING, SessionState.SPEAKING}:
+            raise CompanionError("busy", "Mickey is busy. Tap Stop first.")
+        winner = str(args.get("winner") or "draw")
+        plan = rps_plan(winner)
+        if self._motion_inhibited():
+            return {"ok": True, "skipped": True, "reason": "fall_inhibit"}
+        await self._apply_emotion(plan.think_emotion)
+        try:
+            await self.mcp.call("self.otto.action", rps_think_motion())
+            await self.mcp.call("self.otto.action", plan.motion)
+        except McpError as exc:
+            log.info("companion.rps_motion_failed", session_id=self.session_id, error=str(exc))
+        generation = self.state.generation
+        await self._speak(plan.line, generation, emotion=plan.end_emotion)
+        await self._apply_emotion(plan.end_emotion)
+        if self.state.state != SessionState.CLOSED:
+            self._set_state(SessionState.READY, force=True)
+        return {"ok": True}
 
     async def _consume_speakable(self, generation: int) -> None:
         """Speak Gemini sentences as they are published — do not wait for the full turn."""
@@ -1215,11 +1424,25 @@ class DeviceSession:
             return
         if generation != self.state.generation:
             return
+        if result.function_calls:
+            keep = [
+                call
+                for call in result.function_calls
+                if canonical_tool_name(call.name) != "search_music"
+            ]
+            if keep:
+                result.function_calls = keep
+                try:
+                    result = await self._handle_tools(result, generation, depth=0)
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("session.music_notify_tools_failed", error=str(exc))
+            if generation != self.state.generation:
+                return
         text = sanitize_for_tts(
             cap_text((result.output_text or "").strip(), self.settings.max_tts_chars)
         )
         if not text:
-            return
+            text = _MUSIC_DONE_BURMESE
         self._awaiting_tts_stop = True
         await self._speak(text, generation, emotion="happy")
 
@@ -1532,8 +1755,9 @@ class DeviceSession:
                     return
                 idle_s = time.monotonic() - self._last_rx
                 if idle_s > idle_limit:
-                    if self.state.state in {SessionState.THINKING, SessionState.SPEAKING}:
-                        # Device is silent while we play TTS/music; do not kill the stream.
+                    hub = self._companion_hub()
+                    has_viewers = bool(hub and hub.has_viewers(self.device_id))
+                    if device_idle_exempt(self.state.state, has_viewers):
                         pass
                     else:
                         log.info(
@@ -1577,6 +1801,13 @@ class SessionManager:
         async with self._lock:
             if self._by_device.get(session.device_id) is session:
                 self._by_device.pop(session.device_id, None)
+
+    def get(self, device_id: str) -> DeviceSession | None:
+        return self._by_device.get(device_id.lower())
+
+    def online(self, device_id: str) -> bool:
+        session = self.get(device_id)
+        return session is not None and not session.closed
 
     def count(self) -> int:
         return len(self._by_device)

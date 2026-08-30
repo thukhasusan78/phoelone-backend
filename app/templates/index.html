@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f172a">
+  <title>Mickey — Activate</title>
+  <style>
+    :root {
+      --bg: #0b1220;
+      --card: #131c31;
+      --ink: #f8fafc;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --accent-2: #34d399;
+      --danger: #fb7185;
+      --line: #243049;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      font-family: ui-rounded, "Segoe UI", system-ui, -apple-system, sans-serif;
+      background:
+        radial-gradient(1200px 600px at 10% -10%, #1d4ed833, transparent 55%),
+        radial-gradient(900px 500px at 110% 10%, #0ea5e933, transparent 50%),
+        var(--bg);
+      color: var(--ink);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px 16px;
+    }
+    main {
+      width: min(420px, 100%);
+      background: color-mix(in srgb, var(--card) 92%, black);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      padding: 28px 22px 24px;
+      box-shadow: 0 24px 80px #00000066;
+    }
+    .mark {
+      width: 44px;
+      height: 44px;
+      border-radius: 14px;
+      display: grid;
+      place-items: center;
+      background: linear-gradient(160deg, var(--accent), #6366f1);
+      font-weight: 800;
+      letter-spacing: -0.04em;
+    }
+    h1 { font-size: 1.45rem; margin: 18px 0 8px; letter-spacing: -0.03em; }
+    p { color: var(--muted); line-height: 1.5; margin: 0 0 22px; }
+    label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 8px; }
+    input[type="text"] {
+      width: 100%;
+      font-size: 1.85rem;
+      letter-spacing: 0.4em;
+      text-align: center;
+      padding: 14px 12px 14px 22px;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: #0b1220;
+      color: var(--ink);
+      outline: none;
+    }
+    input[type="text"]:focus { border-color: var(--accent); box-shadow: 0 0 0 3px #38bdf822; }
+    button {
+      width: 100%;
+      margin-top: 16px;
+      border: 0;
+      border-radius: 16px;
+      padding: 14px;
+      font-size: 1rem;
+      font-weight: 700;
+      color: #042f2e;
+      background: linear-gradient(180deg, #5eead4, var(--accent-2));
+      cursor: pointer;
+    }
+    .banner {
+      border-radius: 14px;
+      padding: 12px 14px;
+      margin-bottom: 16px;
+      font-size: 0.95rem;
+    }
+    .ok { background: #064e3b66; color: #a7f3d0; }
+    .err { background: #4c051966; color: var(--danger); }
+    .hint { margin-top: 16px; font-size: 0.8rem; text-align: center; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="mark">M</div>
+    <h1>Activate Mickey</h1>
+    <p>Enter the 6-digit code shown on the robot. The device will finish setup at phoelone.thukha.online.</p>
+    {% if ok %}
+    <div class="banner ok">Robot linked. You can put the device down — it will connect in a few seconds.</div>
+    {% elif error %}
+    <div class="banner err">{{ error }}</div>
+    {% endif %}
+    <form method="post" action="/activate" id="activate-form">
+      <label for="code">Verification code</label>
+      <input
+        id="code"
+        name="code"
+        type="text"
+        inputmode="numeric"
+        pattern="[0-9]*"
+        maxlength="6"
+        minlength="6"
+        autocomplete="one-time-code"
+        autocapitalize="off"
+        spellcheck="false"
+        placeholder="000000"
+        required
+        {% if ok %}disabled{% endif %}
+      >
+      <button type="submit" {% if ok %}disabled{% endif %}>Activate</button>
+    </form>
+    <p class="hint">The code is spoken and shown on the robot screen.</p>
+    {% if pin_configured %}
+    <form method="post" action="/companion/unlock" style="margin-top: 22px">
+      <label for="pin">Already linked? Unlock with PIN</label>
+      <input
+        id="pin"
+        name="pin"
+        type="password"
+        autocomplete="current-password"
+        placeholder="PIN"
+        required
+        style="letter-spacing: 0.2em; font-size: 1.15rem; padding-left: 12px"
+      >
+      <button type="submit">Open dashboard</button>
+    </form>
+    {% endif %}
+  </main>
+  <script>
+    const input = document.getElementById("code");
+    if (input) {
+      input.addEventListener("input", () => {
+        input.value = input.value.replace(/\D/g, "").slice(0, 6);
+      });
+      input.focus();
+    }
+  </script>
+</body>
+</html>

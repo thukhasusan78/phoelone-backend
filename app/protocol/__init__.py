@@ -9,7 +9,7 @@ from app.protocol.messages import (
     system,
     tts,
 )
-from app.protocol.models import AbortMessage, DeviceHello, ListenMessage, McpEnvelope
+from app.protocol.models import AbortMessage, DeviceHello, ListenMessage, McpEnvelope, PongMessage
 from app.protocol.state import SessionState, StateMachine
 
 __all__ = [
@@ -17,6 +17,7 @@ __all__ = [
     "DeviceHello",
     "ListenMessage",
     "McpEnvelope",
+    "PongMessage",
     "SessionState",
     "StateMachine",
     "alert",

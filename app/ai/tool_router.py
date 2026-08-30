@@ -84,7 +84,7 @@ def canonical_tool_name(name: str) -> str:
         return raw
     if raw.startswith("self."):
         return raw
-    if raw.startswith("otto.") or raw.startswith("audio_") or raw.startswith("screen."):
+    if raw.startswith(("otto.", "audio_", "screen.", "mickey.", "phoe_lone.")):
         return f"self.{raw}"
     aliases = {
         "otto.action": "self.otto.action",

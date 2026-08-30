@@ -1,0 +1,22 @@
+[Unit]
+Description=Phoe Lone FastAPI backend
+After=network-online.target postgresql.service redis-server.service
+Wants=network-online.target
+Requires=postgresql.service redis-server.service
+
+[Service]
+Type=simple
+WorkingDirectory=/root/phoe_lone_server
+EnvironmentFile=/root/phoe_lone_server/.env
+# One worker: DeviceSession state is in-process. Do not scale uvicorn workers on 1 vCPU.
+ExecStart=/root/phoe_lone_server/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --proxy-headers --timeout-keep-alive 75
+Restart=always
+RestartSec=3
+TimeoutStopSec=20
+MemoryMax=768M
+CPUQuota=85%
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

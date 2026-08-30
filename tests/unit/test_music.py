@@ -463,6 +463,7 @@ def test_myanmar_play_request_is_detected() -> None:
     assert music_search_query("play some music") == "Myanmar song"
     assert music_search_query("သီချင်း ဖွင့်ပါ") == "Myanmar song"
     assert music_search_query("play never gonna give you up") == "never gonna give you up"
+    assert music_search_query("hey Mickey play a song") == "Myanmar song"
     assert "ဂျိုးလေး" in music_search_query("ဂျိုးလေး သီချင်းဖွင့်ပြ ဂျိုးလေး")
 
 

@@ -155,7 +155,7 @@ def test_flush_speakable_publishes_completed_sentences_before_turn_ends() -> Non
 
     more = SimpleNamespace(
         input_transcription=None,
-        output_transcription=SimpleNamespace(text=" ဖိုးလုန်း ပါ။ ဟယ်လို"),
+        output_transcription=SimpleNamespace(text=" Mickey ပါ။ ဟယ်လို"),
         turn_complete=False,
         generation_complete=False,
         interrupted=False,
@@ -163,7 +163,7 @@ def test_flush_speakable_publishes_completed_sentences_before_turn_ends() -> Non
         model_turn=None,
     )
     assert brain._ingest_server_content(turn, more) is False
-    assert _drain_speakable(brain) == ["ကျွန်တော် ဖိုးလုန်း ပါ။"]
+    assert _drain_speakable(brain) == ["ကျွန်တော် Mickey ပါ။"]
 
     brain._flush_speakable(final=True, text=turn.output_text)
     assert _drain_speakable(brain) == ["ဟယ်လို"]
