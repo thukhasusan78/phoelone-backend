@@ -9,6 +9,7 @@ from app.ai.gemini import FunctionCall
 from app.audio.opus import DOWNLINK_FRAME_SAMPLES
 from app.config import Settings
 from app.main import create_app
+from app.protocol.state import SessionState
 from tests.activation import ota_and_bind
 from tests.fakes import FakeBrain, QuietCodec, SilentCodec, SpeechThenQuietCodec
 
@@ -341,17 +342,53 @@ def test_farewell_exits_after_tts_stop() -> None:
                 session_id = _handshake_and_listen(ws)
                 seen = _collect_until_tts_stop(ws)
                 assert any(p.get("type") == "tts" and p.get("state") == "stop" for p in seen)
-                assert tts.spoken == ["ဘိုင်း။"]
+                assert tts.spoken == ["ဘိုင်း"]
+
+                import time
+
+                time.sleep(0.25)
+                session = application.state.sessions.get("aa:bb:cc:dd:ee:ff")
+                assert session is not None
+                assert session.state.state == SessionState.READY
+                assert session._awaiting_wake is True
+                assert session._companion_lock.locked() is False
+
+                ws.send_text(
+                    json.dumps(
+                        {
+                            "session_id": session_id,
+                            "type": "listen",
+                            "state": "start",
+                            "mode": "auto",
+                        }
+                    )
+                )
+                time.sleep(0.15)
+                assert session.state.state == SessionState.READY
+                assert session._companion_lock.locked() is False
 
                 brain.input_text = "မင်္ဂလာပါ"
                 brain.output_text = "မင်္ဂလာပါ။"
                 brain.calls = []
-                _listen(ws, session_id)
+                ws.send_text(
+                    json.dumps(
+                        {
+                            "session_id": session_id,
+                            "type": "listen",
+                            "state": "detect",
+                        }
+                    )
+                )
+                for _ in range(3):
+                    ws.send_bytes(b"\x00\x01")
+                ws.send_text(
+                    json.dumps({"session_id": session_id, "type": "listen", "state": "stop"})
+                )
                 second = _collect_until_tts_stop(ws)
                 assert any(p.get("type") == "tts" and p.get("state") == "stop" for p in second)
                 stt_msg = next(p for p in second if p.get("type") == "stt")
                 assert stt_msg["text"] == "မင်္ဂလာပါ"
-                assert tts.spoken == ["ဘိုင်း။", "မင်္ဂလာပါ။"]
+                assert tts.spoken == ["ဘိုင်း", "မင်္ဂလာပါ။"]
 
 
 def test_music_play_streams_opus_after_announcement() -> None:

@@ -8,6 +8,7 @@ import pytest
 from app.companion.errors import CompanionError
 from app.companion.reactions import rps_countdown_line, rps_timeout_line
 from app.config import Settings
+from app.protocol.models import ListenMessage
 from app.protocol.state import SessionState
 from app.sessions.session import DeviceSession, SessionManager
 from tests.fakes import FakeBrain
@@ -316,6 +317,44 @@ async def test_sleep_marks_sleeping_not_offline() -> None:
     assert snap["online"] is True
     assert snap["sleeping"] is True
     assert "sleeping" in (snap.get("hint") or "").lower()
+
+
+@pytest.mark.asyncio
+async def test_farewell_ignores_auto_listen_and_allows_sleep() -> None:
+    session = _session()
+    session._awaiting_wake = True
+    session.state.state = SessionState.READY
+    await session._on_listen(
+        ListenMessage(type="listen", session_id="s", state="start", mode="auto")
+    )
+    assert session.state.state == SessionState.READY
+    assert session._awaiting_wake is True
+    assert session._companion_lock.locked() is False
+    state = await session.companion_action("sleep", {})
+    assert state["type"] == "alarm.state"
+    assert session.departing == "sleeping"
+    assert session.mcp.calls[-1][0] == "self.mickey.sleep.now"
+    assert session.state.state == SessionState.READY
+
+
+@pytest.mark.asyncio
+async def test_farewell_wakeword_starts_listen() -> None:
+    session = _session()
+    session._awaiting_wake = True
+    session.state.state = SessionState.READY
+    await session._on_listen(ListenMessage(type="listen", session_id="s", state="detect"))
+    assert session._awaiting_wake is False
+    assert session.state.state == SessionState.LISTENING
+
+
+@pytest.mark.asyncio
+async def test_sleep_aborts_listening() -> None:
+    session = _session()
+    session.state.state = SessionState.LISTENING
+    await session.companion_action("sleep", {})
+    assert session.state.state == SessionState.READY
+    assert session.departing == "sleeping"
+    assert session.mcp.calls[-1][0] == "self.mickey.sleep.now"
 
 
 @pytest.mark.asyncio

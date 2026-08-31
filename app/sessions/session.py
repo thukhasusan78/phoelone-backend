@@ -258,6 +258,7 @@ class DeviceSession:
         self._closed = False
         self._close_code = 1000
         self._close_reason = ""
+        self._awaiting_wake = False
         self._emotion = "happy"
         self._listen_mode = "auto"
         self._pcm_started = False
@@ -344,7 +345,8 @@ class DeviceSession:
         loop.create_task(hub.broadcast(self.device_id, snapshot), name="companion-presence")
 
     async def _request_exit(self) -> None:
-        """Conversation ended (bye); keep /xiaozhi/v1/ open in READY for the next wake."""
+        """End the voice conversation; stay on /xiaozhi/v1/ in READY until the next wakeword."""
+        self._awaiting_wake = True
         log.info("session.exit_requested", session_id=self.session_id)
 
     def _is_farewell(self, text: str) -> bool:
@@ -617,11 +619,23 @@ class DeviceSession:
 
     async def _on_listen(self, msg: ListenMessage) -> None:
         if msg.state == "start":
-            self._listen_mode = msg.mode or "auto"
+            mode = msg.mode or "auto"
+            self._listen_mode = mode
+            # After farewell, Xiaozhi auto-continues with listen/start. Ignore that so
+            # the pipe stays READY for dashboard commands until the next wakeword.
+            if self._awaiting_wake and mode != "manual":
+                log.info(
+                    "session.listen_ignored_until_wake",
+                    session_id=self.session_id,
+                    mode=mode,
+                )
+                return
+            self._awaiting_wake = False
             await self._start_listen()
         elif msg.state == "stop":
             await self._stop_listen()
         elif msg.state == "detect":
+            self._awaiting_wake = False
             await self._abort(reason="wake_word_detected")
             await self._start_listen()
 
@@ -1037,7 +1051,9 @@ class DeviceSession:
                     generation=generation,
                 )
             await self._release_listening_interrupt()
-            if generation == self.state.generation and self.state.state != SessionState.CLOSED:
+            if self.state.state != SessionState.CLOSED and (
+                generation == self.state.generation or self._awaiting_wake
+            ):
                 self._set_state(SessionState.READY, force=True)
             await self._maybe_reconnect_owner_memory()
 
@@ -1058,6 +1074,8 @@ class DeviceSession:
             user_text = self._companion_user_text
         responses: list[dict[str, Any]] = []
         device_moving: bool | None = None
+        exited = False
+        say_goodbye = ""
         for call in calls:
             if generation != self.state.generation:
                 return result
@@ -1129,6 +1147,9 @@ class DeviceSession:
             if tool_name == "search_music":
                 self._queue_music(payload)
                 payload = music_payload_for_llm(payload)
+            if payload.get("exit"):
+                exited = True
+                say_goodbye = str(payload.get("say_goodbye") or say_goodbye).strip()
             log.info(
                 "session.tool_dispatch",
                 session_id=self.session_id,
@@ -1144,6 +1165,16 @@ class DeviceSession:
                     "response": self.router.as_function_response(payload),
                 }
             )
+        if exited:
+            text = say_goodbye or (result.output_text or "").strip()
+            if text:
+                await self.brain.enqueue_speakable(text)
+            log.info(
+                "session.exit_turn_complete",
+                session_id=self.session_id,
+                say_goodbye=text or None,
+            )
+            return TurnResult(input_text=result.input_text, output_text=text)
         continued = await self.brain.continue_with_functions(responses)
         if continued.function_calls and generation == self.state.generation:
             return await self._handle_tools(continued, generation, depth=depth + 1)
@@ -1577,6 +1608,12 @@ class DeviceSession:
         return parse_alarm_state("")
 
     async def _companion_sleep(self, args: dict[str, Any]) -> dict[str, Any]:
+        if self.state.state in {
+            SessionState.LISTENING,
+            SessionState.THINKING,
+            SessionState.SPEAKING,
+        }:
+            await self._abort(reason="companion_sleep")
         payload: dict[str, Any] = {}
         if args:
             try:
