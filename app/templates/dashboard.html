@@ -90,11 +90,175 @@
     }
     button.stop { background: linear-gradient(180deg, #fda4af, var(--danger)); color: #4c0519; }
     button:disabled { opacity: 0.45; cursor: not-allowed; }
+    button.picked { box-shadow: 0 0 0 3px #fde68a88; filter: brightness(1.08); }
+    .chat-log {
+      display: grid;
+      gap: 8px;
+      max-height: 260px;
+      overflow-y: auto;
+      margin: 0 0 12px;
+      min-height: 4.5em;
+    }
+    .chat-log:empty::before {
+      content: "Type to Mickey. He will speak the reply.";
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .bubble {
+      max-width: 88%;
+      padding: 10px 12px;
+      border-radius: 14px;
+      font-size: 0.95rem;
+      line-height: 1.35;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .bubble.you {
+      justify-self: end;
+      background: #1d4ed866;
+      border: 1px solid #38bdf866;
+    }
+    .bubble.mickey {
+      justify-self: start;
+      background: #064e3b55;
+      border: 1px solid #34d39955;
+    }
+    .chat-form { display: flex; gap: 8px; }
+    .chat-form input {
+      flex: 1;
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px 14px;
+      background: #0b1220;
+      color: var(--ink);
+      font-size: 1rem;
+    }
+    .chat-form input:disabled { opacity: 0.45; }
     .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; }
     .score { color: var(--muted); margin: 0 0 12px; }
+    .score.over { color: #fde68a; }
     .reveal { min-height: 1.4em; margin: 0 0 12px; color: var(--ink); }
+    .rps-arena {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: center;
+      gap: 10px;
+      margin: 0 0 14px;
+      padding: 14px 10px;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: #0b122066;
+    }
+    .rps-hand {
+      display: grid;
+      justify-items: center;
+      gap: 6px;
+    }
+    .rps-emoji {
+      width: 72px;
+      height: 72px;
+      border-radius: 20px;
+      display: grid;
+      place-items: center;
+      font-size: 2.1rem;
+      background: #1e293b;
+      border: 1px solid #334155;
+    }
+    .rps-hand .tag { font-size: 0.75rem; color: var(--muted); font-weight: 700; }
+    .rps-vs { font-weight: 800; color: var(--muted); letter-spacing: 0.08em; }
+    .rps-chant {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      margin: 0 0 12px;
+      min-height: 1.6em;
+    }
+    .rps-chant span {
+      font-weight: 800;
+      font-size: 1.05rem;
+      color: #475569;
+      opacity: 0.4;
+      transform: scale(0.92);
+      transition: transform 0.18s ease, color 0.18s ease, opacity 0.18s ease;
+    }
+    .rps-chant span.on {
+      color: #fde68a;
+      opacity: 1;
+      transform: scale(1.12);
+    }
+    .rps-arena.counting .rps-emoji { animation: rps-shake 0.28s ease-in-out infinite; }
+    .rps-emoji.pop { animation: rps-pop 0.42s cubic-bezier(0.2, 1.4, 0.3, 1); }
+    .rps-hand.win .rps-emoji {
+      border-color: #34d39988;
+      box-shadow: 0 0 0 3px #34d39933, 0 10px 28px #34d39922;
+    }
+    .rps-hand.lose .rps-emoji { opacity: 0.55; }
+    @keyframes rps-shake {
+      0%, 100% { transform: translateY(0) rotate(-10deg); }
+      50% { transform: translateY(-9px) rotate(12deg); }
+    }
+    @keyframes rps-pop {
+      0% { transform: scale(0.45); opacity: 0.2; }
+      70% { transform: scale(1.18); opacity: 1; }
+      100% { transform: scale(1); }
+    }
     .foot { display: flex; justify-content: flex-end; }
     .foot button { background: transparent; color: var(--muted); font-weight: 600; padding: 8px; }
+    .meters { display: grid; gap: 10px; margin: 0 0 12px; }
+    .meter { display: grid; gap: 4px; }
+    .meter span { font-size: 0.8rem; color: var(--muted); font-weight: 700; }
+    progress {
+      width: 100%;
+      height: 10px;
+      border: 0;
+      border-radius: 999px;
+      overflow: hidden;
+      background: #0b1220;
+    }
+    progress::-webkit-progress-bar { background: #0b1220; }
+    progress::-webkit-progress-value { background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+    .badges { display: flex; flex-wrap: wrap; gap: 6px; min-height: 1.4em; margin: 10px 0 0; }
+    .badge {
+      border: 1px solid #34d39955;
+      background: #064e3b44;
+      color: #a7f3d0;
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 0.75rem;
+      font-weight: 700;
+    }
+    .memory-form { display: grid; gap: 8px; }
+    .memory-form input {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px 14px;
+      background: #0b1220;
+      color: var(--ink);
+      font-size: 0.95rem;
+    }
+    .tog {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 0.9rem;
+      font-weight: 700;
+    }
+    input[type="time"] {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px 14px;
+      background: #0b1220;
+      color: var(--ink);
+      font-size: 1.05rem;
+      font-weight: 700;
+    }
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+    .meter em { font-style: normal; color: var(--ink); }
   </style>
 </head>
 <body>
@@ -117,10 +281,48 @@
     </header>
 
     <section>
+      <h2>Care</h2>
+      <div class="meters">
+        <div class="meter"><span>Happiness</span><progress id="meter-happy" max="100" value="55"></progress></div>
+        <div class="meter"><span>Energy</span><progress id="meter-energy" max="100" value="70"></progress></div>
+        <div class="meter"><span>Bond</span><progress id="meter-bond" max="100" value="30"></progress></div>
+      </div>
+      <p class="score" id="care-streak">Streak — 0 days</p>
+      <div class="row">
+        <button type="button" id="btn-pet">Pet</button>
+        <button class="ghost" type="button" id="btn-feed">Snack</button>
+      </div>
+      <div class="badges" id="badges"></div>
+    </section>
+
+    <section>
+      <h2>Alarm</h2>
+      <p class="score" id="alarm-status">No alarm set</p>
+      <div class="row" style="margin-bottom: 10px">
+        <input id="alarm-time" type="time" value="07:00">
+        <label class="tog"><input type="checkbox" id="alarm-repeat" checked> Daily</label>
+      </div>
+      <div class="row">
+        <button type="button" id="btn-alarm-save" class="needs-mickey">Save alarm</button>
+        <button type="button" id="btn-sleep" class="needs-mickey">Sleep now</button>
+        <button class="ghost needs-mickey" type="button" id="btn-alarm-cancel">Cancel alarm</button>
+      </div>
+    </section>
+
+    <section>
       <h2>Quick</h2>
       <div class="row">
         <button class="stop" id="btn-stop" type="button">Stop</button>
       </div>
+    </section>
+
+    <section>
+      <h2>Chat</h2>
+      <div class="chat-log" id="chat-log"></div>
+      <form class="chat-form" id="chat-form">
+        <input id="chat-input" type="text" maxlength="400" autocomplete="off" placeholder="Say something to Mickey…">
+        <button type="submit" id="chat-send">Send</button>
+      </form>
     </section>
 
     <section>
@@ -131,12 +333,66 @@
     <section>
       <h2>Rock · Paper · Scissors</h2>
       <p class="score" id="rps-score">Best of 3 — you 0 · Mickey 0</p>
-      <p class="reveal" id="rps-reveal">Start a match, then throw.</p>
+      <div class="rps-arena" id="rps-arena">
+        <div class="rps-hand" id="rps-you-hand">
+          <div class="rps-emoji" id="rps-you-emoji">❔</div>
+          <div class="tag">You</div>
+        </div>
+        <div class="rps-vs" id="rps-vs">VS</div>
+        <div class="rps-hand" id="rps-mickey-hand">
+          <div class="rps-emoji" id="rps-mickey-emoji">❔</div>
+          <div class="tag">Mickey</div>
+        </div>
+      </div>
+      <div class="rps-chant" id="rps-chant" hidden>
+        <span data-beat="0">Rock</span>
+        <span data-beat="1">Paper</span>
+        <span data-beat="2">Scissors</span>
+      </div>
+      <p class="reveal" id="rps-reveal">Tap New match. Mickey chants first — throw with him.</p>
       <div class="row" style="margin-bottom: 10px">
         <button type="button" data-throw="rock">Rock</button>
         <button type="button" data-throw="paper">Paper</button>
         <button type="button" data-throw="scissors">Scissors</button>
+        <button type="button" id="btn-play">Play round</button>
         <button class="ghost" type="button" id="btn-new">New match</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Mickey knows me</h2>
+      <form class="memory-form" id="memory-form">
+        <input id="mem-name" type="text" maxlength="48" autocomplete="name" placeholder="Your name">
+        <input id="mem-nick" type="text" maxlength="48" placeholder="What you call Mickey">
+        <input id="mem-likes" type="text" maxlength="160" placeholder="Things you like">
+        <button type="submit" id="mem-save">Save</button>
+      </form>
+    </section>
+
+    <section>
+      <h2>Settings</h2>
+      <div class="meters">
+        <div class="meter"><span>Volume <em id="vol-label">70</em></span><input id="set-volume" class="needs-mickey" type="range" min="0" max="100" value="70"></div>
+        <div class="meter"><span>Brightness <em id="bri-label">80</em></span><input id="set-brightness" class="needs-mickey" type="range" min="0" max="100" value="80"></div>
+      </div>
+      <div class="row" style="margin-bottom: 10px">
+        <button class="ghost needs-mickey" type="button" id="theme-dark">Dark face</button>
+        <button class="ghost needs-mickey" type="button" id="theme-light">Light face</button>
+      </div>
+      <div class="row" style="margin-bottom: 10px">
+        <button class="ghost needs-mickey" type="button" id="talk-click">Tap to talk</button>
+        <button class="ghost needs-mickey" type="button" id="talk-press">Hold to talk</button>
+      </div>
+      <p class="score" id="fw-version">Firmware —</p>
+      <div class="meters" id="trim-meters">
+        <div class="meter"><span>Left leg <em id="trim-left_leg-label">0</em></span><input id="trim-left_leg" class="needs-mickey" type="range" min="-50" max="50" value="0"></div>
+        <div class="meter"><span>Right leg <em id="trim-right_leg-label">0</em></span><input id="trim-right_leg" class="needs-mickey" type="range" min="-50" max="50" value="0"></div>
+        <div class="meter"><span>Left foot <em id="trim-left_foot-label">0</em></span><input id="trim-left_foot" class="needs-mickey" type="range" min="-50" max="50" value="0"></div>
+        <div class="meter"><span>Right foot <em id="trim-right_foot-label">0</em></span><input id="trim-right_foot" class="needs-mickey" type="range" min="-50" max="50" value="0"></div>
+      </div>
+      <div class="row">
+        <button class="ghost needs-mickey" type="button" id="btn-reboot">Reboot</button>
+        <button class="stop needs-mickey" type="button" id="btn-upgrade">Install update</button>
       </div>
     </section>
 
@@ -177,12 +433,43 @@
     const linkState = document.getElementById("link-state");
     const rpsScore = document.getElementById("rps-score");
     const rpsReveal = document.getElementById("rps-reveal");
+    const rpsArena = document.getElementById("rps-arena");
+    const rpsChant = document.getElementById("rps-chant");
+    const rpsChantWords = [...rpsChant.querySelectorAll("span")];
+    const rpsYouHand = document.getElementById("rps-you-hand");
+    const rpsMickeyHand = document.getElementById("rps-mickey-hand");
+    const rpsYouEmoji = document.getElementById("rps-you-emoji");
+    const rpsMickeyEmoji = document.getElementById("rps-mickey-emoji");
     const throwButtons = [...document.querySelectorAll("[data-throw]")];
     const danceButtons = [...document.querySelectorAll("[data-dance]")];
+    const chatLog = document.getElementById("chat-log");
+    const chatForm = document.getElementById("chat-form");
+    const chatInput = document.getElementById("chat-input");
+    const chatSend = document.getElementById("chat-send");
+    const meterHappy = document.getElementById("meter-happy");
+    const meterEnergy = document.getElementById("meter-energy");
+    const meterBond = document.getElementById("meter-bond");
+    const careStreak = document.getElementById("care-streak");
+    const badges = document.getElementById("badges");
+    const memName = document.getElementById("mem-name");
+    const memNick = document.getElementById("mem-nick");
+    const memLikes = document.getElementById("mem-likes");
+    const RPS_EMOJI = { rock: "✊", paper: "✋", scissors: "✌️" };
+    const RPS_NAMES = { rock: "Rock", paper: "Paper", scissors: "Scissors" };
+    const RPS_BEATS = ["Rock", "Paper", "Scissors"];
 
     let socket = null;
     let online = false;
-    let busy = false;
+    let sleeping = false;
+    let deviceState = "";
+    let alarmSet = false;
+    let rpsPhase = "idle";
+    let rpsRoundId = null;
+    let rpsPick = null;
+    let rpsTimer = null;
+    let rpsResetTimer = null;
+    let chatBusy = false;
+    let canUpgrade = false;
     let backoff = 500;
 
     function showError(message) {
@@ -196,43 +483,287 @@
     }
 
     function setControls() {
-      danceButtons.forEach((btn) => { btn.disabled = !online || busy; });
-      throwButtons.forEach((btn) => { btn.disabled = !online || busy; });
+      const counting = rpsPhase === "countdown";
+      const matchOver = rpsPhase === "match_over";
+      const thinking = deviceState === "thinking";
+      const speaking = deviceState === "speaking";
+      const playable = online && !sleeping;
+      danceButtons.forEach((btn) => { btn.disabled = !playable || thinking; });
+      throwButtons.forEach((btn) => { btn.disabled = !playable || !counting; });
+      const playBtn = document.getElementById("btn-play");
+      if (playBtn) playBtn.disabled = !playable || thinking || speaking || counting || matchOver || rpsPhase === "reveal";
+      const newBtn = document.getElementById("btn-new");
+      if (newBtn) newBtn.disabled = !playable || thinking || speaking;
+      const chatOff = !playable || thinking || speaking || chatBusy || counting;
+      chatInput.disabled = chatOff;
+      chatSend.disabled = chatOff;
+      document.querySelectorAll(".needs-mickey").forEach((el) => { el.disabled = !playable || thinking; });
+      const up = document.getElementById("btn-upgrade");
+      if (up) up.disabled = !playable || thinking || !canUpgrade;
     }
 
-    function applyPresence(msg) {
-      online = !!msg.online;
-      onlinePill.textContent = online ? "Online" : "Offline";
-      onlinePill.className = "pill " + (online ? "on" : "off");
-      const battery = msg.battery == null ? "—" : msg.battery + "%" + (msg.charging ? " charging" : "");
-      batteryPill.textContent = "Battery " + battery;
-      moodPill.textContent = "Mood " + (msg.emotion || "—");
-      if (online) wakeBanner.classList.remove("show");
-      else {
-        wakeBanner.textContent = msg.hint || "Wake Mickey (button or wake word), then play.";
-        wakeBanner.classList.add("show");
+    function appendChat(role, text) {
+      if (!text) return;
+      const bubble = document.createElement("div");
+      bubble.className = "bubble " + role;
+      bubble.textContent = text;
+      chatLog.appendChild(bubble);
+      while (chatLog.children.length > 10) chatLog.removeChild(chatLog.firstChild);
+      chatLog.scrollTop = chatLog.scrollHeight;
+    }
+
+    function applyCare(msg) {
+      if (msg.happiness != null) meterHappy.value = msg.happiness;
+      if (msg.energy != null) meterEnergy.value = msg.energy;
+      if (msg.bond != null) meterBond.value = msg.bond;
+      const days = msg.streak_days || 0;
+      careStreak.textContent = "Streak — " + days + (days === 1 ? " day" : " days");
+    }
+
+    function applyMemory(msg) {
+      memName.value = msg.owner_name || "";
+      memNick.value = msg.nickname || "";
+      memLikes.value = msg.likes || "";
+    }
+
+    function pad2(n) {
+      return (n < 10 ? "0" : "") + n;
+    }
+
+    function applyAlarm(msg) {
+      const status = document.getElementById("alarm-status");
+      const timeEl = document.getElementById("alarm-time");
+      const repeatEl = document.getElementById("alarm-repeat");
+      if (msg.set && msg.hour != null && msg.minute != null) {
+        alarmSet = true;
+        timeEl.value = pad2(msg.hour) + ":" + pad2(msg.minute);
+        repeatEl.checked = msg.repeat !== false;
+        status.textContent = (msg.repeat === false ? "Once at " : "Daily at ") + timeEl.value;
+      } else {
+        alarmSet = false;
+        status.textContent = "No alarm set";
       }
-      if (msg.state === "thinking" || msg.state === "speaking") {
-        /* dance allowed while speaking; throws stay gated by server */
+    }
+
+    function applySettings(msg) {
+      const vol = document.getElementById("set-volume");
+      const bri = document.getElementById("set-brightness");
+      if (msg.volume != null) {
+        vol.value = msg.volume;
+        document.getElementById("vol-label").textContent = msg.volume;
+      }
+      if (msg.brightness != null) {
+        bri.value = msg.brightness;
+        document.getElementById("bri-label").textContent = msg.brightness;
+      }
+      document.getElementById("theme-dark").classList.toggle("picked", msg.theme === "dark");
+      document.getElementById("theme-light").classList.toggle("picked", msg.theme === "light");
+      document.getElementById("talk-click").classList.toggle("picked", msg.press_to_talk === "click_to_talk");
+      document.getElementById("talk-press").classList.toggle("picked", msg.press_to_talk === "press_to_talk");
+      document.getElementById("fw-version").textContent = "Firmware " + (msg.firmware_version || "—");
+      canUpgrade = !!msg.can_upgrade;
+      const trims = msg.trims || {};
+      ["left_leg", "right_leg", "left_foot", "right_foot"].forEach((name) => {
+        if (trims[name] == null) return;
+        const el = document.getElementById("trim-" + name);
+        const label = document.getElementById("trim-" + name + "-label");
+        if (el) el.value = trims[name];
+        if (label) label.textContent = trims[name];
+      });
+      setControls();
+    }
+
+    function addBadge(code, title) {
+      if (!code || badges.querySelector('[data-code="' + code + '"]')) return;
+      const el = document.createElement("span");
+      el.className = "badge";
+      el.dataset.code = code;
+      el.textContent = title || code;
+      badges.appendChild(el);
+    }
+
+    function applyAchievements(msg) {
+      const codes = msg.codes || [];
+      const titles = msg.titles || {};
+      codes.forEach((code) => addBadge(code, titles[code]));
+    }
+
+    function clearRpsTimer() {
+      if (rpsTimer) {
+        clearInterval(rpsTimer);
+        rpsTimer = null;
+      }
+    }
+
+    function clearRpsReset() {
+      if (rpsResetTimer) {
+        clearTimeout(rpsResetTimer);
+        rpsResetTimer = null;
+      }
+    }
+
+    function clearRpsPick() {
+      rpsPick = null;
+      throwButtons.forEach((btn) => btn.classList.remove("picked"));
+    }
+
+    function setRpsPick(choice) {
+      rpsPick = choice;
+      throwButtons.forEach((btn) => {
+        btn.classList.toggle("picked", btn.dataset.throw === choice);
+      });
+    }
+
+    function resetRpsHands() {
+      rpsYouHand.classList.remove("win", "lose");
+      rpsMickeyHand.classList.remove("win", "lose");
+      rpsYouEmoji.classList.remove("pop");
+      rpsMickeyEmoji.classList.remove("pop");
+    }
+
+    function startRpsCountdown(ms) {
+      clearRpsTimer();
+      clearRpsReset();
+      rpsPhase = "countdown";
+      resetRpsHands();
+      clearRpsPick();
+      rpsArena.classList.add("counting");
+      rpsChant.hidden = false;
+      rpsYouEmoji.textContent = "✊";
+      rpsMickeyEmoji.textContent = "✊";
+      let beat = 0;
+      const step = Math.max(280, Math.floor((ms || 2400) / 3));
+      function tick() {
+        rpsChantWords.forEach((el, idx) => el.classList.toggle("on", idx === beat));
+        rpsReveal.textContent = RPS_BEATS[beat] + (beat === 2 ? " — throw!" : "...");
+        beat = (beat + 1) % 3;
+      }
+      tick();
+      rpsTimer = setInterval(tick, step);
+      setControls();
+    }
+
+    function stopRpsCountdown() {
+      clearRpsTimer();
+      rpsArena.classList.remove("counting");
+      rpsChant.hidden = true;
+      rpsChantWords.forEach((el) => el.classList.remove("on"));
+    }
+
+    function scoreLine(msg) {
+      const you = (msg.score && msg.score.you) || 0;
+      const mickey = (msg.score && msg.score.mickey) || 0;
+      const best = msg.best_of || 3;
+      const need = msg.wins_needed || Math.floor(best / 2) + 1;
+      return "Best of " + best + " · first to " + need + " — you " + you + " · Mickey " + mickey;
+    }
+
+    function applyGame(msg) {
+      rpsScore.textContent = scoreLine(msg);
+      rpsScore.classList.toggle("over", msg.phase === "match_over");
+      if (msg.phase === "countdown") {
+        if (msg.round_id !== rpsRoundId) {
+          rpsRoundId = msg.round_id;
+          startRpsCountdown(msg.countdown_ms);
+        } else {
+          rpsPhase = "countdown";
+          setControls();
+        }
+        return;
+      }
+      if (msg.timeout) {
+        stopRpsCountdown();
+        rpsPhase = "awaiting_throw";
+        rpsRoundId = null;
+        resetRpsHands();
+        clearRpsPick();
+        rpsYouEmoji.textContent = "❔";
+        rpsMickeyEmoji.textContent = "❔";
+        rpsReveal.textContent = "Too slow — tap Play round and throw with Mickey.";
+        setControls();
+        return;
+      }
+      if (msg.you && msg.mickey) {
+        stopRpsCountdown();
+        rpsPhase = msg.phase === "match_over" ? "match_over" : "reveal";
+        rpsRoundId = null;
+        resetRpsHands();
+        rpsYouEmoji.textContent = RPS_EMOJI[msg.you] || "❔";
+        rpsMickeyEmoji.textContent = RPS_EMOJI[msg.mickey] || "❔";
+        void rpsYouEmoji.offsetWidth;
+        void rpsMickeyEmoji.offsetWidth;
+        rpsYouEmoji.classList.add("pop");
+        rpsMickeyEmoji.classList.add("pop");
+        if (msg.winner === "player") {
+          rpsYouHand.classList.add("win");
+          rpsMickeyHand.classList.add("lose");
+        } else if (msg.winner === "mickey") {
+          rpsMickeyHand.classList.add("win");
+          rpsYouHand.classList.add("lose");
+        }
+        let line = "You " + (RPS_NAMES[msg.you] || msg.you) + " · Mickey " + (RPS_NAMES[msg.mickey] || msg.mickey);
+        if (msg.winner === "player") line += " — you take the round";
+        else if (msg.winner === "mickey") line += " — Mickey takes the round";
+        else if (msg.winner === "draw") line += " — draw";
+        if (msg.phase === "match_over" || msg.match_winner) {
+          rpsPhase = "match_over";
+          if (msg.match_winner === "player") line = "You win the match! " + line;
+          else if (msg.match_winner === "mickey") line = "Mickey wins the match! " + line;
+          else line += ". Match over.";
+          line += " Tap New match to play again.";
+          clearRpsReset();
+          rpsResetTimer = setTimeout(() => {
+            resetRpsHands();
+            rpsYouEmoji.textContent = "❔";
+            rpsMickeyEmoji.textContent = "❔";
+          }, 2800);
+        }
+        rpsReveal.textContent = line;
+        setControls();
+        return;
+      }
+      stopRpsCountdown();
+      rpsPhase = msg.phase === "match_over" ? "match_over" : "awaiting_throw";
+      rpsRoundId = null;
+      resetRpsHands();
+      clearRpsPick();
+      rpsYouEmoji.textContent = "❔";
+      rpsMickeyEmoji.textContent = "❔";
+      if (rpsPhase === "match_over") {
+        rpsReveal.textContent = "Match over. Tap New match to play again.";
+      } else {
+        rpsReveal.textContent = "Mickey is ready. Tap Play round — then throw on Scissors.";
       }
       setControls();
     }
 
-    function applyGame(msg) {
-      const you = (msg.score && msg.score.you) || 0;
-      const mickey = (msg.score && msg.score.mickey) || 0;
-      rpsScore.textContent = "Best of " + (msg.best_of || 3) + " — you " + you + " · Mickey " + mickey;
-      if (msg.you && msg.mickey) {
-        const names = { rock: "Rock", paper: "Paper", scissors: "Scissors" };
-        let line = "You " + names[msg.you] + " · Mickey " + names[msg.mickey];
-        if (msg.winner === "player") line += " — you win";
-        else if (msg.winner === "mickey") line += " — Mickey wins";
-        else if (msg.winner === "draw") line += " — draw";
-        if (msg.phase === "match_over") line += ". Match over.";
-        rpsReveal.textContent = line;
+    function applyPresence(msg) {
+      const wasPlayable = online && !sleeping;
+      online = !!msg.online;
+      sleeping = !!msg.sleeping;
+      deviceState = (msg.state || "").toLowerCase();
+      const playable = online && !sleeping;
+      if (sleeping) {
+        onlinePill.textContent = "Sleeping";
+        onlinePill.className = "pill off";
       } else {
-        rpsReveal.textContent = "Match ready. Throw when you are.";
+        onlinePill.textContent = online ? "Online" : "Offline";
+        onlinePill.className = "pill " + (online ? "on" : "off");
       }
+      const battery = msg.battery == null ? "—" : msg.battery + "%" + (msg.charging ? " charging" : "");
+      batteryPill.textContent = "Battery " + battery;
+      moodPill.textContent = "Mood " + (msg.emotion || "—");
+      if (playable) {
+        wakeBanner.classList.remove("show");
+        if (!wasPlayable) {
+          send({ type: "alarm.get" });
+          send({ type: "settings.get" });
+        }
+      } else {
+        wakeBanner.textContent = msg.hint || "Wake Mickey (button or wake word), then play.";
+        wakeBanner.classList.add("show");
+      }
+      setControls();
     }
 
     function send(payload) {
@@ -251,7 +782,9 @@
       socket.onclose = () => {
         linkState.textContent = "Reconnecting…";
         online = false;
-        applyPresence({ online: false });
+        sleeping = false;
+        deviceState = "";
+        applyPresence({ online: false, sleeping: false });
         const wait = backoff;
         backoff = Math.min(backoff * 2, 8000);
         setTimeout(connect, wait);
@@ -266,28 +799,164 @@
           applyPresence(msg);
         } else if (msg.type === "game.state") {
           applyGame(msg);
+        } else if (msg.type === "chat.user") {
+          appendChat("you", msg.text || "");
+        } else if (msg.type === "chat.reply") {
+          if (msg.text) appendChat("mickey", msg.text);
+          chatBusy = false;
+          setControls();
+        } else if (msg.type === "care.state") {
+          applyCare(msg);
+        } else if (msg.type === "memory.state") {
+          applyMemory(msg);
+        } else if (msg.type === "achieve.state") {
+          applyAchievements(msg);
+        } else if (msg.type === "achieve.unlock") {
+          addBadge(msg.code, msg.title);
+        } else if (msg.type === "alarm.state") {
+          applyAlarm(msg);
+        } else if (msg.type === "settings.state") {
+          applySettings(msg);
         } else if (msg.type === "error") {
           showError(msg.message || "Something went wrong.");
-          if (msg.code === "busy") busy = true;
-          if (msg.code === "offline") applyPresence({ online: false, hint: msg.message });
-          setTimeout(() => { busy = false; setControls(); }, 400);
+          chatBusy = false;
+          if (msg.code === "offline") applyPresence({ online: false, sleeping: false, hint: msg.message });
+          if (rpsPhase === "countdown" && msg.code === "invalid") {
+            stopRpsCountdown();
+            rpsPhase = "awaiting_throw";
+          }
+          setControls();
         }
       };
     }
 
     document.getElementById("btn-stop").addEventListener("click", () => {
-      busy = false;
+      chatBusy = false;
+      if (rpsPhase === "countdown") {
+        stopRpsCountdown();
+        rpsPhase = "awaiting_throw";
+        rpsRoundId = null;
+        clearRpsPick();
+      }
       showError("");
       send({ type: "command.stop" });
+      setControls();
+    });
+    chatForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const text = (chatInput.value || "").trim();
+      if (!text || chatInput.disabled) return;
+      chatBusy = true;
+      setControls();
+      send({ type: "chat.send", text: text });
+      chatInput.value = "";
+    });
+    document.getElementById("btn-pet").addEventListener("click", () => {
+      send({ type: "care.action", kind: "pet" });
+    });
+    document.getElementById("btn-feed").addEventListener("click", () => {
+      send({ type: "care.action", kind: "feed" });
+    });
+    document.getElementById("memory-form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      send({
+        type: "memory.set",
+        owner_name: memName.value,
+        nickname: memNick.value,
+        likes: memLikes.value,
+      });
     });
     document.getElementById("btn-new").addEventListener("click", () => {
+      stopRpsCountdown();
+      rpsPhase = "awaiting_throw";
+      rpsRoundId = null;
+      clearRpsPick();
       send({ type: "game.start", game: "rps", best_of: 3 });
+    });
+    document.getElementById("btn-play").addEventListener("click", () => {
+      send({ type: "game.round", game: "rps" });
     });
     danceButtons.forEach((btn) => {
       btn.addEventListener("click", () => send({ type: "command.dance", action: btn.dataset.dance }));
     });
     throwButtons.forEach((btn) => {
-      btn.addEventListener("click", () => send({ type: "game.move", game: "rps", player: btn.dataset.throw }));
+      btn.addEventListener("click", () => {
+        if (rpsPhase !== "countdown") return;
+        setRpsPick(btn.dataset.throw);
+        send({ type: "game.move", game: "rps", player: btn.dataset.throw });
+      });
+    });
+
+    function alarmPayload(sleepNow) {
+      const parts = (document.getElementById("alarm-time").value || "07:00").split(":");
+      const hour = parseInt(parts[0], 10);
+      const minute = parseInt(parts[1], 10);
+      return {
+        type: "alarm.set",
+        hour: hour,
+        minute: minute,
+        repeat: document.getElementById("alarm-repeat").checked,
+        sleep_now: !!sleepNow,
+      };
+    }
+
+    document.getElementById("btn-alarm-save").addEventListener("click", () => {
+      send(alarmPayload(false));
+    });
+    document.getElementById("btn-sleep").addEventListener("click", () => {
+      if (alarmSet) send({ type: "sleep.now" });
+      else send(alarmPayload(true));
+    });
+    document.getElementById("btn-alarm-cancel").addEventListener("click", () => {
+      send({ type: "alarm.cancel" });
+    });
+    document.getElementById("set-volume").addEventListener("change", (event) => {
+      const value = parseInt(event.target.value, 10);
+      document.getElementById("vol-label").textContent = value;
+      send({ type: "settings.set", volume: value });
+    });
+    document.getElementById("set-volume").addEventListener("input", (event) => {
+      document.getElementById("vol-label").textContent = event.target.value;
+    });
+    document.getElementById("set-brightness").addEventListener("change", (event) => {
+      const value = parseInt(event.target.value, 10);
+      document.getElementById("bri-label").textContent = value;
+      send({ type: "settings.set", brightness: value });
+    });
+    document.getElementById("set-brightness").addEventListener("input", (event) => {
+      document.getElementById("bri-label").textContent = event.target.value;
+    });
+    document.getElementById("theme-dark").addEventListener("click", () => {
+      send({ type: "settings.set", theme: "dark" });
+    });
+    document.getElementById("theme-light").addEventListener("click", () => {
+      send({ type: "settings.set", theme: "light" });
+    });
+    document.getElementById("talk-click").addEventListener("click", () => {
+      send({ type: "settings.set", press_to_talk: "click_to_talk" });
+    });
+    document.getElementById("talk-press").addEventListener("click", () => {
+      send({ type: "settings.set", press_to_talk: "press_to_talk" });
+    });
+    document.getElementById("btn-reboot").addEventListener("click", () => {
+      if (!window.confirm("Reboot Mickey now?")) return;
+      send({ type: "settings.reboot" });
+    });
+    document.getElementById("btn-upgrade").addEventListener("click", () => {
+      if (!window.confirm("Install the published firmware and reboot? Do not unplug him.")) return;
+      send({ type: "settings.upgrade" });
+    });
+    ["left_leg", "right_leg", "left_foot", "right_foot"].forEach((name) => {
+      const el = document.getElementById("trim-" + name);
+      if (!el) return;
+      el.addEventListener("input", () => {
+        document.getElementById("trim-" + name + "-label").textContent = el.value;
+      });
+      el.addEventListener("change", () => {
+        const trims = {};
+        trims[name] = parseInt(el.value, 10);
+        send({ type: "settings.set", trims: trims });
+      });
     });
 
     setControls();

@@ -84,7 +84,11 @@ def _merge_catalog(tool: dict[str, Any]) -> dict[str, Any]:
 
 
 def enrich_discovered_tools(discovered: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """English-enrich LLM-visible device tools. Fall back to the Phoe Lone catalog if discovery is empty."""
+    """English-enrich LLM-visible device tools.
+
+    Empty discovery falls back to core Otto/Mickey tools only. Sensor tools
+    (``self.phoe_lone.*``) are never injected unless ``tools/list`` returned them.
+    """
     visible = [t for t in discovered if t.get("name") and not is_user_only(t)]
     by_name = {t["name"]: t for t in visible}
     if not by_name:

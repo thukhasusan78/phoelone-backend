@@ -56,5 +56,5 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         await session.run()
     finally:
         await manager.detach(session)
-        if websocket.client_state == WebSocketState.CONNECTED:
+        if websocket.application_state == WebSocketState.CONNECTED:
             await websocket.close()

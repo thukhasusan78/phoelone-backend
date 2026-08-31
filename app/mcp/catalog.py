@@ -1,4 +1,4 @@
-"""English MCP catalog for Mickey / otto-robot LLM-visible tools.
+"""English MCP catalog for Mickey (OTA board type ``mickey``) LLM-visible tools.
 
 Device tools are implemented on the ESP32. This module supplies complete
 English descriptions and input schemas so Gemini can call them accurately.
@@ -243,7 +243,8 @@ LLM_TOOLS: dict[str, dict[str, Any]] = {
         "description": (
             "Set the overnight wake alarm on the robot clock (local time, 24-hour). "
             "hour is 0-23, minute is 0-59. 7:00 AM is hour=7, minute=0; 7:00 PM is hour=19. "
-            "repeat=true means every day; repeat=false or omit means once. "
+            "repeat=true means every day; repeat=false means once. "
+            "Firmware defaults omitted repeat to daily — always pass repeat explicitly. "
             "sleep_now=true also starts deep sleep after storing the alarm "
             "(good night + wake-me-at). Do not invent a time; ask if the hour is missing."
         ),
@@ -253,7 +254,7 @@ LLM_TOOLS: dict[str, dict[str, Any]] = {
                 "minute": {"type": "integer", "description": "Local minute 0-59"},
                 "repeat": {
                     "type": "boolean",
-                    "description": "true=daily, false=once; default false",
+                    "description": "true=daily (firmware default if omitted), false=once",
                 },
                 "sleep_now": {
                     "type": "boolean",
@@ -282,12 +283,31 @@ LLM_TOOLS: dict[str, dict[str, Any]] = {
     "self.mickey.sleep.now": {
         "name": "self.mickey.sleep.now",
         "description": (
-            "Enter deep sleep now (or a firmware bench-test delay). "
-            "Call for good night, go to sleep, I am going to bed — without a wake time. "
-            "If they also gave a wake time, call self.mickey.alarm.set with sleep_now=true "
-            "instead of this tool. Not a chat-exit tool."
+            "Enter deep sleep until a wake time. "
+            "With no args: uses the stored enabled alarm; fails with "
+            "'no wake time; set hour/minute or seconds' if none is set. "
+            "Pass hour (0-23) and minute (0-59) to override or store a wake time. "
+            "Pass seconds (1-86400) for a bench-test timer that does not need a synced clock. "
+            "Good night with a wake time: prefer self.mickey.alarm.set with sleep_now=true. "
+            "Good night with no wake time: call this empty only if an alarm is already stored, "
+            "or pass seconds for a nap. Not a chat-exit tool."
         ),
-        "inputSchema": _object({}),
+        "inputSchema": _object(
+            {
+                "hour": {
+                    "type": "integer",
+                    "description": "Optional local hour 0-23; omit to use the stored alarm",
+                },
+                "minute": {
+                    "type": "integer",
+                    "description": "Optional local minute 0-59",
+                },
+                "seconds": {
+                    "type": "integer",
+                    "description": "Optional 1-86400 bench-test sleep seconds; no synced clock required",
+                },
+            }
+        ),
     },
     "self.music.play_song": {
         "name": "self.music.play_song",
@@ -330,9 +350,6 @@ PHOE_LONE_FALLBACK_NAMES = [
     "self.otto.get_status",
     "self.battery.get_level",
     "self.otto.get_ip",
-    "self.phoe_lone.imu.get_reading",
-    "self.phoe_lone.light.get_level",
-    "self.phoe_lone.touch.get_state",
     "self.mickey.alarm.set",
     "self.mickey.alarm.get",
     "self.mickey.alarm.cancel",
@@ -344,6 +361,13 @@ MICKEY_DEVICE_TOOLS = (
     "self.mickey.alarm.get",
     "self.mickey.alarm.cancel",
     "self.mickey.sleep.now",
+)
+
+# Only expose to Gemini when tools/list returned them (Mickey I2C is often NC).
+PHOE_LONE_SENSOR_TOOLS = (
+    "self.phoe_lone.imu.get_reading",
+    "self.phoe_lone.light.get_level",
+    "self.phoe_lone.touch.get_state",
 )
 
 

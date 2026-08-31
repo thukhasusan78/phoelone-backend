@@ -1,10 +1,10 @@
 # Phoe Lone FastAPI backend
 
-XiaoZhi-compatible brain for the ESP32 Phoe Lone / otto-robot client.
+XiaoZhi-compatible brain for the ESP32 Mickey client ([thukhasusan78/phoelone](https://github.com/thukhasusan78/phoelone), board type `mickey`). Legacy OTA identities `otto-robot` and `phoe-lone` are still accepted.
 
 The device posts to `/xiaozhi/ota/`, receives a WebSocket URL, then speaks over `wss://…/xiaozhi/v1/`. MQTT/UDP is omitted from OTA JSON so the robot stays on the WebSocket voice path. Camera boards may POST `/vision/explain/` (stub until a camera is wired).
 
-The XiaoZhi **wire protocol** (hello, listen, TTS, MCP) is in [backend_spec.md](backend_spec.md). Servo-hold firmware patches are in [firmware/otto-robot/README.md](firmware/otto-robot/README.md).
+The XiaoZhi **wire protocol** (hello, listen, TTS, MCP) is in [backend_spec.md](backend_spec.md). Servo-hold firmware patches historically lived in [firmware/otto-robot/README.md](firmware/otto-robot/README.md); live code is `main/boards/mickey/` on the firmware repo.
 
 ## Architecture
 
@@ -36,7 +36,7 @@ pytest
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Point firmware `CONFIG_OTA_URL` at `https://phoelone.thukha.online/xiaozhi/ota/`.
+Point firmware `CONFIG_OTA_URL` at `https://phoelone.thukha.online/xiaozhi/ota/`. Live Mickey builds bake that URL in `main/boards/mickey/config.json` (`board.type` = `mickey`).
 
 New robots POST OTA, show a 6-digit code, and stay pending until that code is entered at [https://phoelone.thukha.online/](https://phoelone.thukha.online/). WebSocket is rejected until then.
 

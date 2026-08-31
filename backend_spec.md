@@ -1,13 +1,14 @@
 # Phoe Lone Backend Specification
 
-This document is the XiaoZhi **wire protocol** (OTA, WebSocket, MCP, audio framing) derived from the ESP-IDF client (`otto-robot` / Phoe Lone). How **this** FastAPI repo actually runs (Silero VAD, Gemini Live, local music) is in [README.md](README.md). Do **not** invent extra device-side APIs.
+This document is the XiaoZhi **wire protocol** (OTA, WebSocket, MCP, audio framing) derived from the ESP-IDF Mickey client ([thukhasusan78/phoelone](https://github.com/thukhasusan78/phoelone)). How **this** FastAPI repo actually runs (Silero VAD, Gemini Live, local music) is in [README.md](README.md). Do **not** invent extra device-side APIs.
 
-**Primary transport for Phoe Lone:** WebSocket (stock otto-robot). MQTT + UDP is optional and must still be implemented if the OTA JSON advertises it.
+**Live board identity:** `mickey` (`POST` body `board.type`, compile-time `BOARD_TYPE`). Legacy `otto-robot` and `phoe-lone` are still accepted by this backend.
 
-**Firmware profile:** `python scripts/build.py otto-robot --name otto-robot`  
+**Primary transport:** WebSocket. MQTT + UDP is optional and must still be implemented if the OTA JSON advertises it.
+
+**Firmware profile:** `python scripts/build.py mickey --name mickey --language en-US`  
 **Chip:** ESP32-S3, 16 MB flash, 8 MB octal PSRAM  
-**Default OTA URL (menuconfig `CONFIG_OTA_URL`):** `https://api.tenclass.net/xiaozhi/ota/`  
-Point the device at this VPS by setting **only** `CONFIG_OTA_URL` (or NVS `wifi.ota_url`) to:
+**OTA URL (baked in `main/boards/mickey/config.json` `CONFIG_OTA_URL`):**
 
 ```
 https://phoelone.thukha.online/xiaozhi/ota/
@@ -18,7 +19,7 @@ https://phoelone.thukha.online/xiaozhi/ota/
 ## 1. System architecture
 
 ```
-ESP32 (otto-robot firmware)
+ESP32 (mickey firmware)
   │  boot
   ├─ HTTP POST  /xiaozhi/ota/           →  websocket NVS, optional firmware URL, activation code if unbound
   ├─ HTTP POST  /xiaozhi/ota/activate   →  202 until portal bind, then 200
@@ -86,8 +87,8 @@ After Wi-Fi connects, `Ota::CheckVersion()` (`main/ota.cc`) POSTs (or GETs if bo
   "ota": { "label": "ota_0" },
   "display": { "monochrome": false, "width": 240, "height": 240 },
   "board": {
-    "type": "otto-robot",
-    "name": "otto-robot",
+    "type": "mickey",
+    "name": "mickey",
     "manufacturer": "<BOARD_MANUFACTURER>",
     "ssid": "HomeWifi",
     "rssi": -45,
@@ -170,7 +171,7 @@ The device parses these **top-level objects**. Unknown keys are ignored. String/
 
 **Bound / CLI-provisioned:** OTA omits `activation`. `ALLOW_AUTO_PROVISION=false` rejects unknown devices with 403 (no code).
 
-**Do not** put `CONFIG_OTA_URL` into otto-robot `config.json`. Board identity / OTA channel stays `otto-robot`.
+**Live Mickey firmware** bakes `CONFIG_OTA_URL` into `main/boards/mickey/config.json`. OTA `board.type` is `mickey`. This backend also accepts legacy `otto-robot` and `phoe-lone`.
 
 ---
 
@@ -214,7 +215,9 @@ Built by `WebsocketProtocol::GetHelloMessage()`:
 
 If `CONFIG_USE_SERVER_AEC` is enabled, `features.aec` is `true`. If assets advertise glyph push, `features.glyph_push` is `true` and `text_font` is present (`bundle`, `charset`, `size`, `bpp`).
 
-`version` matches `Protocol-Version` (1/2/3). `frame_duration` is `OPUS_FRAME_DURATION_MS` = **60**.
+`version` matches NVS `websocket.version` from OTA (this backend sends `1`). `frame_duration` is `OPUS_FRAME_DURATION_MS` = **60**.
+
+This server speaks **protocol v1 raw Opus only**. If `hello.version` is not `1` or `features.aec` is `true`, the handshake is rejected (WebSocket close **1003**, reason logged as `session.hello_rejected`). Do not mix v1 raw frames with v2 timestamped binary until both sides ship AEC together.
 
 ### 3.3 Server → device `hello` (required)
 
@@ -388,7 +391,7 @@ Shows user bubble. Send after ASR of the current utterance.
 Application keepalive every ~30 s while the WebSocket is open, including during TTS/music. Independent of WebSocket opcode ping.
 
 ```json
-{ "session_id": "xxx", "type": "ping" }
+{ "session_id": "xxx", "type": "ping", "ts_ms": 1710000000000 }
 ```
 
 #### system
@@ -529,7 +532,7 @@ Device replies are sent with `Protocol::SendMcpMessage` as the same envelope; `p
   "result": {
     "protocolVersion": "2024-11-05",
     "capabilities": { "tools": {} },
-    "serverInfo": { "name": "otto-robot", "version": "2.4.2" }
+    "serverInfo": { "name": "mickey", "version": "2.4.2" }
   }
 }
 ```
@@ -605,7 +608,7 @@ Missing required args → JSON-RPC error `{ "message": "Missing valid argument: 
 
 Tool callbacks run on the application task; do not block the WS loop on the server waiting more than a few seconds for motion tools.
 
-### 5.5 Common tools (all otto-robot builds)
+### 5.5 Common tools (Mickey / XiaoZhi common set)
 
 Registered in `McpServer::AddCommonTools` (`main/mcp_server.cc`). Visible to the LLM.
 
@@ -799,6 +802,8 @@ Empty IP → `{ "ip": "", "connected": false }`.
 
 Firmware may return `wired: false` (stub) or `wired: true` (live MPU6050 / light / touch). The LLM must handle both and must never invent `ax` / lux / touch when `wired:false` or `ok:false`.
 
+This backend **does not** inject these names into Gemini unless device `tools/list` returned them. Empty MCP discovery uses the core Otto/Mickey fallback catalog only.
+
 | Name | Typical JSON |
 |------|-------------|
 | `self.phoe_lone.imu.get_reading` | Stub: `{ "wired": false, "sensor": "MPU6050", "reason": "..." }`. Live: `{ "wired": true, "sensor": "MPU6050", "ax", "ay", "az", "gx", "gy", "gz", "pitch", "roll", "temp_c", "event" }` where `event` is `still` \| `moving` \| `pickup` \| `putdown` \| `fall` \| `shake`. I2C fail: `{ "wired": true, "ok": false, "error": "i2c_nack" }`. |
@@ -806,6 +811,15 @@ Firmware may return `wired: false` (stub) or `wired: true` (live MPU6050 / light
 | `self.phoe_lone.touch.get_state` | Stub: `{ "wired": false, ... }`. Live: `{ "wired": true, "touched": true, "count": 14, "ms_held": 320 }`. A pet may also arrive as `notifications/phoe_lone.event`. |
 
 If IMU `event` is `fall`, prefer `self.otto.stop`; do not walk.
+
+### 5.6 Mickey alarm / sleep (`main/boards/mickey/mickey_alarm.cc`)
+
+| Name | Args | Behavior |
+|------|------|----------|
+| `self.mickey.alarm.set` | `hour` 0–23, `minute` 0–59, `repeat` bool, `sleep_now` bool | Store wake time. **Firmware default `repeat=true` (daily) if omitted** — always pass `repeat` explicitly. `sleep_now=true` enters deep sleep until that time. |
+| `self.mickey.alarm.get` | none | Stored alarm JSON (`enabled`, `hour`, `minute`, `repeat`, …). |
+| `self.mickey.alarm.cancel` | none | Clear stored alarm. |
+| `self.mickey.sleep.now` | optional `hour`, `minute`, `seconds` 1–86400 | Empty call uses the **stored enabled** alarm and fails with `no wake time; set hour/minute or seconds` if none is set. `seconds` is a bench timer (no synced clock). |
 
 ---
 
@@ -842,7 +856,7 @@ Minimum set so “nothing is left behind” versus a full XiaoZhi-style assistan
 | STT | Decode uplink Opus; this backend endpoints with server Silero VAD (device may not send `listen/stop`) then Gemini Live transcription |
 | TTS | After LLM text, send `tts/start`, binary Opus, `sentence_start` per sentence, `tts/stop` |
 | Barge-in | On new `listen/detect` or abort, stop TTS |
-| AEC | If `features.aec` is true, prefer `listen/start` `mode: realtime` and binary protocol v2 timestamps |
+| AEC | This server refuses `features.aec` and `hello.version != 1` (close 1003). Stay on v1 raw Opus until both sides ship v2 together. |
 
 If you cannot run real ASR/TTS yet, still send a valid TTS cycle (even a short silence Opus + “I heard you”) so the device leaves `listening`. Never leave the device in listening forever without `tts` or closing the socket.
 
@@ -901,20 +915,48 @@ Do not send these frames to the ESP32. The hub translates them to existing XiaoZ
 | `type` | Fields |
 |--------|--------|
 | `hello` | `device_id` |
-| `presence` | `online`, `state`, `emotion`, `battery`, `charging`, optional `hint` |
-| `game.state` | `game: rps`, `match_id`, `you`, `mickey`, `winner`, `score`, `best_of`, `phase` |
+| `presence` | `online`, `state`, `emotion`, `battery`, `charging`, optional `sleeping` / `rebooting`, optional `hint` |
+| `game.state` | `game: rps`, `match_id`, optional `round_id`, `you`, `mickey`, `winner`, `score`, `best_of`, `wins_needed`, `phase` (`awaiting_throw` \| `countdown` \| `match_over`), optional `countdown_ms` / `committed` while `phase` is `countdown`, optional `match_winner` when the match is over, optional `timeout` if nobody threw in time (both throws stay hidden until the reveal frame) |
 | `error` | `code` (`offline` \| `busy` \| `invalid` \| `rate_limited`), `message` |
+| `chat.user` | `text` — echo of a typed companion line (capped at 400 chars) |
+| `chat.reply` | `text`, `emotion` — after Mickey speaks the answer |
+| `memory.state` | `owner_name`, `nickname`, `likes`, `locale` |
+| `care.state` | `happiness`, `energy`, `bond`, `streak_days`, `updated_at` |
+| `achieve.unlock` | `code`, `title` — once when a badge is earned |
+| `alarm.state` | `set`, `hour`, `minute`, `repeat` — robot clock; never a server cron |
+| `settings.state` | `volume`, `brightness`, `theme`, `press_to_talk`, `firmware_version`, `can_upgrade` |
 
 **Browser → server**
 
 | `type` | Fields |
 |--------|--------|
 | `command.dance` | `action` — allowlist: walk, jump, swing, moonwalk, bend, shake_leg, updown, sit, showcase, home |
-| `command.stop` | none — `self.otto.stop`, abort if speaking |
-| `game.start` | `game: rps`, optional `best_of` (default 3) |
-| `game.move` | `game: rps`, `player`: rock \| paper \| scissors |
+| `command.stop` | none — `self.otto.stop`, abort if speaking or thinking |
+| `game.start` | `game: rps`, optional `best_of` (default 3) — resets the match and Mickey starts the first chant |
+| `game.round` | `game: rps` — start the next chant without resetting the score |
+| `game.move` | `game: rps`, `player`: rock \| paper \| scissors — only during `countdown`; both throws reveal together after the chant |
+| `chat.send` | `text` — typed line; empty/whitespace is `error.invalid` |
+| `memory.get` | none |
+| `memory.set` | optional `owner_name`, `nickname`, `likes` (capped; stored in Postgres / in-memory stub) |
+| `care.action` | `kind`: `pet` \| `feed` — works while Mickey is offline |
+| `alarm.get` | none — read the robot wake clock |
+| `alarm.set` | `hour` 0–23, `minute` 0–59, `repeat` bool (default true), optional `sleep_now` |
+| `alarm.cancel` | none |
+| `sleep.now` | optional `hour`, `minute` — empty uses the stored alarm |
+| `settings.get` | none — volume / brightness / theme from `self.get_device_status` |
+| `settings.set` | optional `volume`, `brightness`, `theme`, `press_to_talk`, optional `trims` (`left_leg` / `right_leg` / `left_foot` / `right_foot`, -50 to 50) |
+| `settings.reboot` | none — `self.reboot` (confirm in the UI) |
+| `settings.upgrade` | none — server supplies `FIRMWARE_URL`; refused if unpublished (`0.0.0` / `none.bin`); no client `url` or `force` |
 
-If the device session is absent, commands fail with `offline` and presence shows “Wake Mickey (button or wake word), then play.” A dashboard viewer holds the device idle timeout so a silent READY session is not closed mid-game. Game rules run on the server; Gemini is not in this path.
+If the device session is absent, commands fail with `offline` and presence shows “Wake Mickey (button or wake word), then play.” After `sleep.now` / `alarm.set sleep_now` the session may still be open: presence stays connected with `sleeping: true` and hint “Mickey is sleeping…” until the device socket closes (do not fake `offline` while the session is live). A dashboard viewer holds the device idle timeout so a silent READY session is not closed mid-game. Game rules run on the server; Gemini is not in this path.
+
+RPS is chant-first on the existing companion pipe: `game.start` (or `game.round`) broadcasts `phase: countdown` with both throws hidden while the device speaks `tts` “Rock… Paper… Scissors!” on `/xiaozhi/v1/`. The owner taps `game.move` *during* that chant. When countdown TTS finishes, the hub broadcasts the result `game.state`; Mickey’s jump/sit/home reaction and a win/lose/draw `tts` line start on the same tick, then `home` returns him to stand. First to 2 of 3 wins; `match_over` + `match_winner` end the match until `game.start`.
+
+Phone chat reuses the device Gemini Live socket (`send_client_content`, no second session and no uplink PCM). `chat.send` echoes `chat.user` immediately, then `companion_action("chat")` injects the typed line. THINKING or SPEAKING refuses a new chat (`busy` — tap Stop). Chat is also capped at 10 messages/minute (`COMPANION_CHAT_RATE_LIMIT_PER_MINUTE`). Transcripts stay in RAM (last 10) for open dashboard tabs.
+
+Owner memory is per `device_id` + `client_id` and is injected into Gemini `system_instruction` at Live configure (not by mutating the global prompt string). Care meters decay from a lifespan `asyncio` task about every 8 minutes. Achievements are an event log (`first_activate`, `first_web_dance`, `first_rps_win`, `chat_streak_3`, `first_pet`).
+
+Alarm and settings are device MCP on the same companion pipe. `alarm.*` maps to `self.mickey.alarm.*` / `self.mickey.sleep.now`; the robot clock is source of truth (offline → `error.offline`, no server-side cron). `settings.set` uses volume/brightness/theme/press-to-talk plus optional `trims`. `settings.reboot` and `settings.upgrade` list user-only tools with `withUserTools: true` on a separate map (never `gemini_tools`). Upgrade never accepts a URL from the browser.
 
 ---
 
@@ -939,14 +981,15 @@ Reference client sources (do not copy cloud servers):
 - `main/protocols/protocol.cc`
 - `main/application.cc` (`OnIncomingJson`)
 - `main/mcp_server.cc` / `main/mcp_server.h`
-- `main/boards/otto-robot/otto_controller.cc`
+- `main/boards/mickey/otto_controller.cc`
+- `main/boards/mickey/mickey_alarm.cc`
 - `docs/websocket.md`, `docs/mqtt-udp.md`, `docs/mcp-protocol.md`
 
 ---
 
 ## 14. What this backend must not do
 
-- Do not require pin changes or a custom board type.
+- Do not require pin changes. Live OTA identity is `mickey`; still accept legacy `otto-robot` / `phoe-lone`.
 - Do not send `type: iot` (deprecated).
 - Do not call `self.chassis.*` / `self.dog.*` / `self.electron.*` on Phoe Lone; those belong to other boards.
 - Do not block waiting for IMU/light/touch hardware; `wired: false` stubs remain valid.

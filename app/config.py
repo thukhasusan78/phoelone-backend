@@ -123,6 +123,7 @@ class Settings(BaseSettings):
     ota_rate_limit_per_minute: int = 30
     ws_rate_limit_per_minute: int = 20
     companion_rate_limit_per_minute: int = 30
+    companion_chat_rate_limit_per_minute: int = 10
     companion_cookie_ttl_s: int = 30 * 24 * 3600
     companion_pin: str = ""
     max_tts_chars: int = 800

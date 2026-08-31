@@ -29,6 +29,8 @@ class McpClient:
         self._pending: dict[int, asyncio.Future] = {}
         self.tools: list[dict[str, Any]] = []
         self.tool_by_name: dict[str, dict[str, Any]] = {}
+        self.user_tool_by_name: dict[str, dict[str, Any]] = {}
+        self._user_tools_listed = False
         self._lock = asyncio.Lock()
         self._motion_lock = asyncio.Lock()
         self._notification_handler: Callable[[dict[str, Any]], None] | None = None
@@ -104,13 +106,13 @@ class McpClient:
             params["capabilities"]["vision"] = vision
         return await self.send_request("initialize", params)
 
-    async def list_tools(self) -> list[dict[str, Any]]:
+    async def _fetch_tools(self, *, with_user_tools: bool) -> list[dict[str, Any]]:
         tools: list[dict[str, Any]] = []
         cursor = ""
         while True:
             result = await self.send_request(
                 "tools/list",
-                {"cursor": cursor, "withUserTools": False},
+                {"cursor": cursor, "withUserTools": bool(with_user_tools)},
             )
             batch = result.get("tools") or []
             tools.extend(batch)
@@ -118,11 +120,41 @@ class McpClient:
             if not next_cursor:
                 break
             cursor = next_cursor
+        return tools
+
+    async def list_tools(self, *, with_user_tools: bool = False) -> list[dict[str, Any]]:
+        if with_user_tools:
+            return await self.list_user_tools()
+        tools = await self._fetch_tools(with_user_tools=False)
         self.tools = tools
         self.tool_by_name = {t["name"]: t for t in tools if "name" in t}
         self.apply_english_catalog()
         log.info("mcp.tools_discovered", count=len(self.tools), names=list(self.tool_by_name))
         return tools
+
+    async def list_user_tools(self) -> list[dict[str, Any]]:
+        """One-shot tools/list with withUserTools. Never replaces the LLM catalog."""
+        from app.mcp.tools import is_user_only
+
+        tools = await self._fetch_tools(with_user_tools=True)
+        self.user_tool_by_name = {
+            str(t["name"]): t for t in tools if t.get("name") and is_user_only(t)
+        }
+        self._user_tools_listed = True
+        log.info(
+            "mcp.user_tools_discovered",
+            count=len(self.user_tool_by_name),
+            names=list(self.user_tool_by_name),
+        )
+        return list(self.user_tool_by_name.values())
+
+    async def ensure_user_tools(self) -> None:
+        if self._user_tools_listed:
+            return
+        try:
+            await self.list_user_tools()
+        except Exception as exc:  # noqa: BLE001
+            log.info("mcp.user_tools_list_failed", error=str(exc), session_id=self.session_id)
 
     def apply_english_catalog(self) -> None:
         from app.mcp.tools import enrich_discovered_tools

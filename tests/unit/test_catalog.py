@@ -5,7 +5,12 @@ import re
 from app.ai.prompts import SYSTEM_PROMPT
 from app.ai.tool_router import HOST_DECLARATIONS, ToolRouter
 from app.config import Settings
-from app.mcp.catalog import LLM_TOOLS, PHOE_LONE_FALLBACK_NAMES, USER_ONLY_TOOLS
+from app.mcp.catalog import (
+    LLM_TOOLS,
+    PHOE_LONE_FALLBACK_NAMES,
+    PHOE_LONE_SENSOR_TOOLS,
+    USER_ONLY_TOOLS,
+)
 from app.mcp.client import McpClient
 from app.mcp.tools import enrich_discovered_tools
 from app.tools.knowledge import KnowledgeTool
@@ -28,14 +33,13 @@ REQUIRED_DEVICE_TOOLS = {
     "self.otto.get_status",
     "self.battery.get_level",
     "self.otto.get_ip",
-    "self.phoe_lone.imu.get_reading",
-    "self.phoe_lone.light.get_level",
-    "self.phoe_lone.touch.get_state",
     "self.mickey.alarm.set",
     "self.mickey.alarm.get",
     "self.mickey.alarm.cancel",
     "self.mickey.sleep.now",
 }
+
+SENSOR_DEVICE_TOOLS = set(PHOE_LONE_SENSOR_TOOLS)
 
 
 def test_system_prompt_is_english() -> None:
@@ -67,7 +71,9 @@ def test_system_prompt_is_english() -> None:
 
 def test_catalog_covers_spec_tools() -> None:
     assert REQUIRED_DEVICE_TOOLS <= set(LLM_TOOLS)
+    assert SENSOR_DEVICE_TOOLS <= set(LLM_TOOLS)
     assert REQUIRED_DEVICE_TOOLS <= set(PHOE_LONE_FALLBACK_NAMES)
+    assert SENSOR_DEVICE_TOOLS.isdisjoint(PHOE_LONE_FALLBACK_NAMES)
     assert "walk" in (LLM_TOOLS["self.otto.action"]["inputSchema"]["properties"]["action"]["enum"])
     assert "self.reboot" in USER_ONLY_TOOLS
     assert "self.camera.take_photo" not in PHOE_LONE_FALLBACK_NAMES
@@ -98,12 +104,31 @@ def test_enrich_replaces_non_english_description() -> None:
     assert "action" in action["inputSchema"]["properties"]
 
 
-def test_empty_discovery_uses_full_catalog() -> None:
+def test_empty_discovery_uses_core_catalog_without_sensors() -> None:
     tools = enrich_discovered_tools([])
     names = {t["name"] for t in tools}
     assert REQUIRED_DEVICE_TOOLS <= names
+    assert SENSOR_DEVICE_TOOLS.isdisjoint(names)
     for tool in tools:
         assert MYANMAR.search(tool["description"]) is None
+
+
+def test_discovered_sensor_tools_are_enriched() -> None:
+    tools = enrich_discovered_tools(
+        [
+            {
+                "name": "self.phoe_lone.imu.get_reading",
+                "description": "错误",
+                "inputSchema": {"type": "object", "properties": {}},
+            }
+        ]
+    )
+    names = {t["name"] for t in tools}
+    assert "self.phoe_lone.imu.get_reading" in names
+    assert "self.phoe_lone.light.get_level" not in names
+    imu = next(t for t in tools if t["name"] == "self.phoe_lone.imu.get_reading")
+    assert "wired:true" in imu["description"]
+    assert "错误" not in imu["description"]
 
 
 def test_router_exposes_host_and_device_tools() -> None:
@@ -125,6 +150,7 @@ def test_router_exposes_host_and_device_tools() -> None:
     decls = router.gemini_tools(mcp)
     names = {d["name"] for d in decls}
     assert REQUIRED_DEVICE_TOOLS <= names
+    assert SENSOR_DEVICE_TOOLS.isdisjoint(names)
     assert {d["name"] for d in HOST_DECLARATIONS} <= names
     assert "search_weather" in names
     assert "get_datetime" in names
@@ -160,10 +186,17 @@ def test_mickey_alarm_catalog_and_prompt() -> None:
     props = setter["inputSchema"]["properties"]
     assert setter["inputSchema"]["required"] == ["hour", "minute"]
     assert {"hour", "minute", "repeat", "sleep_now"} <= set(props)
+    assert "firmware default" in props["repeat"]["description"].lower()
     assert "7:00 AM" in setter["description"] or "hour=7" in SYSTEM_PROMPT
+    sleep = LLM_TOOLS["self.mickey.sleep.now"]
+    sleep_props = sleep["inputSchema"]["properties"]
+    assert {"hour", "minute", "seconds"} <= set(sleep_props)
+    assert "no wake time" in sleep["description"].lower()
     assert "self.mickey.sleep.now" in SYSTEM_PROMPT
     assert "handle_exit_intent" in SYSTEM_PROMPT
     assert "good night" in SYSTEM_PROMPT.lower()
+    assert "repeat=false" in SYSTEM_PROMPT
+    assert "no alarm is stored" in SYSTEM_PROMPT.lower() or "already stored" in SYSTEM_PROMPT.lower()
     tools = enrich_discovered_tools(
         [
             {

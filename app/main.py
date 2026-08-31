@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -30,12 +31,42 @@ log = get_logger(__name__)
 def _build_repository(settings: Settings):
     if settings.uses_memory_db:
         log.warning("db.memory_backend")
-        return InMemoryDeviceRepository(), None, None
-    from app.db.sqlalchemy_repo import PostgresDeviceRepository, create_engine, session_factory
+        from app.db.companion_store import InMemoryCompanionStore
+
+        return InMemoryDeviceRepository(), None, None, InMemoryCompanionStore()
+    from app.db.sqlalchemy_repo import (
+        PostgresCompanionStore,
+        PostgresDeviceRepository,
+        create_engine,
+        session_factory,
+    )
 
     engine = create_engine(settings.database_url)
     factory = session_factory(engine)
-    return PostgresDeviceRepository(factory), engine, factory
+    return PostgresDeviceRepository(factory), engine, factory, PostgresCompanionStore(factory)
+
+
+async def _care_loop(app: FastAPI) -> None:
+    from app.companion.life import CARE_TICK_S
+
+    try:
+        while True:
+            await asyncio.sleep(CARE_TICK_S)
+            store = getattr(app.state, "companion_store", None)
+            hub = getattr(app.state, "companion", None)
+            if store is None or hub is None:
+                continue
+            try:
+                changed = await store.decay_all()
+            except Exception as exc:  # noqa: BLE001
+                log.info("companion.care_tick_failed", error=str(exc))
+                continue
+            viewers = set(hub.viewer_ids())
+            for state in changed:
+                if state.device_id.lower() in viewers:
+                    await hub.broadcast(state.device_id, state.to_state())
+    except asyncio.CancelledError:
+        return
 
 
 @asynccontextmanager
@@ -44,14 +75,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_logging(settings.log_level, json_logs=settings.is_production)
     if not ffmpeg_available():
         log.warning("codec.ffmpeg_missing")
-    repo, engine, factory = _build_repository(settings)
+    repo, engine, factory, store = _build_repository(settings)
     app.state.engine = engine
     app.state.session_factory = factory
+    app.state.companion_store = store
     app.state.auth = AuthService(repo, settings)
     app.state.sessions = SessionManager(settings)
     from app.companion.hub import CompanionHub
 
-    app.state.companion = CompanionHub(app.state.sessions)
+    app.state.companion = CompanionHub(app.state.sessions, store)
     app.state.key_pool = KeyPool(settings.gemini_keys)
     app.state.tts = EdgeTtsClient(settings)
     app.state.brain_factory = lambda: GeminiLiveBrain(settings, app.state.key_pool)
@@ -85,6 +117,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     local_root = music_local_root(settings.music_local_dir)
     if local_root is not None:
         scan_local_music(local_root)
+    care_tick = asyncio.create_task(_care_loop(app), name="companion-care")
     log.info(
         "app.started",
         environment=settings.environment,
@@ -94,6 +127,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        care_tick.cancel()
+        try:
+            await care_tick
+        except (asyncio.CancelledError, Exception):
+            pass
         await http.aclose()
         if app.state.redis is not None:
             await app.state.redis.aclose()

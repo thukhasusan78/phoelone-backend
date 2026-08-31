@@ -28,6 +28,11 @@ def test_live_brain_builds_config() -> None:
     config = brain._build_live_config()
     assert config is not None
     assert config.response_modalities == ["AUDIO"]
+    assert "Mickey" in (config.system_instruction or "")
+    assert "OWNER MEMORY" not in (config.system_instruction or "")
+    brain.set_owner_context("OWNER MEMORY\nOwner's spoken name: Thukha")
+    with_mem = brain._build_live_config()
+    assert "Thukha" in (with_mem.system_instruction or "")
     assert config.realtime_input_config is not None
     assert config.realtime_input_config.automatic_activity_detection.disabled is True
     assert config.realtime_input_config.turn_coverage == "TURN_INCLUDES_ALL_INPUT"
@@ -105,6 +110,21 @@ def test_ingest_waits_when_generation_complete_without_text() -> None:
     )
     assert brain._ingest_server_content(turn, turn_done) is True
     assert "မင်္ဂလာပါ" in turn.input_text
+
+
+async def test_send_text_turn_skipped_when_cancelled() -> None:
+    settings = Settings(
+        environment="test",
+        database_url="memory://",
+        gemini_api_keys="k",
+        gemini_model="gemini-3.1-flash-live-preview",
+    )
+    brain = GeminiLiveBrain(settings, KeyPool(settings.gemini_keys))
+    await brain.cancel()
+    result = await brain.send_text_turn("မင်္ဂလာပါ")
+    assert result.output_text == ""
+    assert result.input_text == "မင်္ဂလာပါ"
+    assert result.error is None
 
 
 async def test_notify_music_finished_skipped_when_cancelled() -> None:

@@ -57,6 +57,14 @@ _RPS_LINES = {
 
 _RPS_LINE_INDEX = {"player": 0, "mickey": 0, "draw": 0}
 
+_RPS_COUNTDOWN_LINE = "Rock... Paper... Scissors!"
+_RPS_TIMEOUT_LINE = "အင်း မမှီဘူး။"
+_RPS_MATCH_OVER = {
+    "player": "ရှင်ပဲ ဒီပွဲ နိုင်သွားပြီ။",
+    "mickey": "ဒီပွဲ ကျွန်တော် နိုင်ပြီ။",
+}
+RPS_SIT_HOLD_S = 0.4
+
 
 @dataclass(frozen=True)
 class RpsPlan:
@@ -64,6 +72,15 @@ class RpsPlan:
     motion: dict[str, Any]
     line: str
     end_emotion: str
+    countdown_line: str = _RPS_COUNTDOWN_LINE
+
+
+def rps_countdown_line() -> str:
+    return _RPS_COUNTDOWN_LINE
+
+
+def rps_timeout_line() -> str:
+    return _RPS_TIMEOUT_LINE
 
 
 def dance_payload(action: str) -> dict[str, Any]:
@@ -82,12 +99,19 @@ def dance_payload(action: str) -> dict[str, Any]:
     return payload
 
 
-def rps_plan(winner: str) -> RpsPlan:
+def rps_recover_motion() -> dict[str, Any]:
+    return dance_payload("home")
+
+
+def rps_plan(winner: str, *, match_over: bool = False) -> RpsPlan:
     if winner not in _RPS_LINES:
         winner = "draw"
     idx = _RPS_LINE_INDEX[winner] % len(_RPS_LINES[winner])
     _RPS_LINE_INDEX[winner] = idx + 1
     line = _RPS_LINES[winner][idx]
+    closer = _RPS_MATCH_OVER.get(winner, "") if match_over else ""
+    if closer:
+        line = f"{line} {closer}"
     if winner == "player":
         return RpsPlan(
             think_emotion="thinking",

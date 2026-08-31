@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import orjson
@@ -51,8 +52,14 @@ def mcp(session_id: str, payload: dict[str, Any]) -> str:
     return dumps({"session_id": session_id, "type": "mcp", "payload": payload})
 
 
-def keepalive(session_id: str) -> str:
-    return dumps({"session_id": session_id, "type": "ping"})
+def keepalive(session_id: str, ts_ms: int | None = None) -> str:
+    return dumps(
+        {
+            "session_id": session_id,
+            "type": "ping",
+            "ts_ms": int(time.time() * 1000) if ts_ms is None else ts_ms,
+        }
+    )
 
 
 def alert(session_id: str, status: str, message: str, emotion: str) -> str:

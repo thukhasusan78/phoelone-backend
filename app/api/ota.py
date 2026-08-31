@@ -12,7 +12,7 @@ from app.db.models import normalize_mac
 from app.location import extract_ota_location, refine_with_wifi
 from app.observability.logging import get_logger
 from app.observability.metrics import OTA_REQUESTS
-from app.ota.boards import is_known_board_type, normalize_board_type
+from app.ota.boards import PRIMARY_BOARD_TYPE, is_known_board_type, normalize_board_type
 from app.tools.http import SafeHttp
 
 log = get_logger(__name__)
@@ -118,6 +118,8 @@ async def ota(
         pending=auth_result.activation is not None,
         board_type=board_type or None,
         board_known=is_known_board_type(board_type),
+        board_primary=PRIMARY_BOARD_TYPE,
+        board_is_primary=board_type == PRIMARY_BOARD_TYPE,
         wifi_ssid=board.get("ssid"),
         wifi_bssid=board.get("bssid") or board.get("wifi_bssid"),
     )

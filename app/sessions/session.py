@@ -35,9 +35,27 @@ from app.audio.pacer import pace_opus_frames, pace_opus_stream
 from app.audio.speech_gate import create_speech_gate
 from app.audio.text import FALLBACK_BURMESE, cap_text, chunk_burmese, sanitize_for_tts
 from app.companion.errors import CompanionError
-from app.companion.hub import WAKE_HINT, device_idle_exempt
-from app.companion.reactions import dance_payload, rps_plan, rps_think_motion
-from app.companion.status import parse_battery_reading
+from app.companion.hub import REBOOT_HINT, SLEEP_HINT, WAKE_HINT, device_idle_exempt
+from app.companion.reactions import (
+    RPS_SIT_HOLD_S,
+    dance_payload,
+    rps_countdown_line,
+    rps_plan,
+    rps_recover_motion,
+    rps_think_motion,
+    rps_timeout_line,
+)
+from app.companion.status import (
+    alarm_set_args,
+    can_upgrade,
+    firmware_upgrade_url,
+    parse_alarm_state,
+    parse_battery_reading,
+    parse_firmware_version,
+    parse_settings_state,
+    parse_trims,
+    settings_patch_calls,
+)
 from app.config import Settings
 from app.mcp.client import McpClient, McpError
 from app.observability.logging import get_logger
@@ -177,6 +195,16 @@ def _pcm16le_mono_to_wav_bytes(pcm: bytes, sample_rate_hz: int = 16000) -> bytes
     return out.getvalue()
 
 
+class HandshakeError(RuntimeError):
+    """Device hello is not WebSocket protocol v1 raw Opus."""
+
+    def __init__(self, reason: str, *, close_code: int = 1003, **details: Any) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.close_code = close_code
+        self.details = details
+
+
 class Outbound:
     __slots__ = ("kind", "payload", "generation")
 
@@ -224,6 +252,8 @@ class DeviceSession:
         self._last_rx = time.monotonic()
         self._last_uplink = 0.0
         self._closed = False
+        self._close_code = 1000
+        self._close_reason = ""
         self._close_after_chat = False
         self._emotion = "happy"
         self._listen_mode = "auto"
@@ -244,9 +274,16 @@ class DeviceSession:
         self._motion_inhibited_until = 0.0
         self._sensor_event_last: dict[str, float] = {}
         self._companion_lock = asyncio.Lock()
+        self._companion_user_text: str | None = None
+        self._owner_reconnect_pending = False
+        self._departing: str | None = None
         self._battery: int | None = None
         self._charging: bool | None = None
         self._status_at = 0.0
+
+    @property
+    def departing(self) -> str | None:
+        return self._departing
 
     def _tool_context(self, user_text: str | None = None) -> dict[str, Any]:
         ctx: dict[str, Any] = {}
@@ -288,6 +325,20 @@ class DeviceSession:
             except Exception:
                 self.state.state = target
         self._log_state(target, previous=prev)
+        self._schedule_presence_broadcast()
+
+    def _schedule_presence_broadcast(self) -> None:
+        hub = self._companion_hub()
+        if hub is None or self._closed:
+            return
+        if not hub.has_viewers(self.device_id):
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        snapshot = self.presence_snapshot()
+        loop.create_task(hub.broadcast(self.device_id, snapshot), name="companion-presence")
 
     async def _request_exit(self) -> None:
         self._close_after_chat = True
@@ -331,6 +382,16 @@ class DeviceSession:
                         await receive_task
                     except (asyncio.CancelledError, Exception):
                         pass
+        except HandshakeError as exc:
+            log.warning(
+                "session.hello_rejected",
+                session_id=self.session_id,
+                device_id=self.device_id,
+                reason=exc.reason,
+                **exc.details,
+            )
+            self._close_code = exc.close_code
+            self._close_reason = exc.reason[:123]
         except WebSocketDisconnect:
             log.info("session.disconnect", session_id=self.session_id)
         except Exception as exc:  # noqa: BLE001
@@ -355,9 +416,12 @@ class DeviceSession:
                 await asyncio.wait_for(self._writer_task, timeout=2)
             except Exception:  # noqa: BLE001
                 self._writer_task.cancel()
-        if self.ws.client_state == WebSocketState.CONNECTED:
+        if self.ws.application_state == WebSocketState.CONNECTED:
             try:
-                await self.ws.close()
+                await self.ws.close(
+                    code=self._close_code,
+                    reason=self._close_reason or None,
+                )
             except Exception:  # noqa: BLE001
                 pass
         SESSIONS_ACTIVE.dec()
@@ -369,19 +433,40 @@ class DeviceSession:
                 self.ws.receive_text(), timeout=self.settings.hello_timeout_s
             )
         except (TimeoutError, asyncio.TimeoutError) as exc:
-            raise RuntimeError("hello timeout") from exc
+            raise HandshakeError("hello timeout", close_code=1008) from exc
         self._last_rx = time.monotonic()
         try:
             hello = DeviceHello.model_validate_json(raw)
         except ValidationError as exc:
-            raise RuntimeError("invalid hello") from exc
+            raise HandshakeError("invalid hello") from exc
         if hello.transport != "websocket":
-            raise RuntimeError("unsupported transport")
+            raise HandshakeError(
+                "unsupported transport",
+                transport=hello.transport,
+            )
+        header_version = self.ws.headers.get("protocol-version")
         if hello.version != 1:
-            raise RuntimeError("unsupported protocol version")
+            raise HandshakeError(
+                f"unsupported hello.version={hello.version}; this server speaks WebSocket protocol v1 raw Opus only",
+                hello_version=hello.version,
+                protocol_version_header=header_version,
+                features_aec=hello.features.aec,
+            )
+        if hello.features.aec:
+            raise HandshakeError(
+                "features.aec requires binary protocol v2 timestamps; this server speaks v1 raw Opus only",
+                hello_version=hello.version,
+                protocol_version_header=header_version,
+                features_aec=True,
+            )
         params = hello.audio_params
         if params.format != "opus" or params.sample_rate != 16000 or params.channels != 1:
-            raise RuntimeError("unsupported uplink audio_params")
+            raise HandshakeError(
+                "unsupported uplink audio_params",
+                audio_format=params.format,
+                sample_rate=params.sample_rate,
+                channels=params.channels,
+            )
         if params.frame_duration != 60:
             log.warning("session.unexpected_frame_duration", value=params.frame_duration)
         await self._queue_json(server_hello(self.session_id))
@@ -399,6 +484,11 @@ class DeviceSession:
             client_ip=self.client_ip,
             device_city=getattr(self.device_location, "city", None),
             wifi_ssid=getattr(self.device_location, "ssid", None),
+            hello_version=hello.version,
+            protocol_version_header=header_version,
+            features_mcp=hello.features.mcp,
+            features_aec=hello.features.aec,
+            features_glyph_push=hello.features.glyph_push,
         )
         await self._notify_companion_presence()
 
@@ -418,6 +508,7 @@ class DeviceSession:
             await self.brain.configure_tools(self.router.gemini_tools(self.mcp))
         except Exception as exc:  # noqa: BLE001
             log.warning("brain.configure_failed", error=str(exc))
+        await self._load_owner_memory()
         # Warm the Live socket now so the first wake is not a multi-second connect.
         try:
             await self.brain.ensure_connected()
@@ -508,6 +599,13 @@ class DeviceSession:
         )
         if event == "fall":
             self._motion_inhibited_until = now + _FALL_INHIBIT_S
+            return
+        if event in {"pet", "pickup"}:
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self._credit_sensor_care(event))
+            except RuntimeError:
+                pass
             return
         if self.state.state == SessionState.SPEAKING:
             return
@@ -831,6 +929,7 @@ class DeviceSession:
             user_text = " ".join((result.input_text or "").split()).strip()
             if user_text:
                 await self._queue_json(stt(self.session_id, user_text), generation)
+                await self._credit_interaction("voice")
                 if self._is_farewell(user_text):
                     await self._request_exit()
 
@@ -932,6 +1031,7 @@ class DeviceSession:
             await self._release_listening_interrupt()
             if generation == self.state.generation and self.state.state != SessionState.CLOSED:
                 self._set_state(SessionState.READY, force=True)
+            await self._maybe_reconnect_owner_memory()
             await self._maybe_close_after_chat()
 
     async def _handle_tools(
@@ -947,6 +1047,8 @@ class DeviceSession:
             return TurnResult(input_text=result.input_text, error="too many tool rounds")
         calls = result.function_calls
         user_text = " ".join((result.input_text or "").split()).strip()
+        if self._companion_user_text:
+            user_text = self._companion_user_text
         responses: list[dict[str, Any]] = []
         device_moving: bool | None = None
         for call in calls:
@@ -1059,11 +1161,80 @@ class DeviceSession:
     def closed(self) -> bool:
         return self._closed
 
+    def _companion_store(self):
+        try:
+            return getattr(self.ws.app.state, "companion_store", None)
+        except Exception:  # noqa: BLE001
+            return None
+
     def _companion_hub(self):
         try:
             return getattr(self.ws.app.state, "companion", None)
         except Exception:  # noqa: BLE001
             return None
+
+    async def _load_owner_memory(self) -> None:
+        store = self._companion_store()
+        if store is None or self.brain is None:
+            return
+        try:
+            memory = await store.get_memory(self.device_id, self.client_id)
+        except Exception as exc:  # noqa: BLE001
+            log.info("companion.memory_load_failed", error=str(exc), session_id=self.session_id)
+            return
+        await self.apply_owner_memory(memory, reconnect=False)
+
+    async def apply_owner_memory(self, memory, *, reconnect: bool = True) -> None:
+        from app.companion.life import owner_prompt_prefix
+
+        if self.brain is None:
+            return
+        setter = getattr(self.brain, "set_owner_context", None)
+        if callable(setter):
+            setter(owner_prompt_prefix(memory))
+        if not reconnect:
+            return
+        if self.state.state != SessionState.READY:
+            self._owner_reconnect_pending = True
+            return
+        await self._reconnect_owner_live()
+
+    async def _reconnect_owner_live(self) -> None:
+        if self.brain is None or self._closed:
+            self._owner_reconnect_pending = False
+            return
+        self._owner_reconnect_pending = False
+        close = getattr(self.brain, "close", None)
+        if callable(close):
+            try:
+                await close()
+            except Exception as exc:  # noqa: BLE001
+                log.info("companion.memory_reconnect_close_failed", error=str(exc))
+        ensure = getattr(self.brain, "ensure_connected", None)
+        if callable(ensure):
+            try:
+                await ensure()
+            except Exception as exc:  # noqa: BLE001
+                log.info("companion.memory_reconnect_failed", error=str(exc))
+
+    async def _maybe_reconnect_owner_memory(self) -> None:
+        if not self._owner_reconnect_pending:
+            return
+        if self._closed or self.state.state != SessionState.READY:
+            return
+        await self._reconnect_owner_live()
+
+    async def _credit_interaction(self, kind: str) -> None:
+        hub = self._companion_hub()
+        if hub is None:
+            return
+        try:
+            await hub.credit(self.device_id, self.client_id, kind)
+        except Exception as exc:  # noqa: BLE001
+            log.info("companion.care_credit_failed", error=str(exc), kind=kind)
+
+    async def _credit_sensor_care(self, _event: str) -> None:
+        await self._credit_interaction("pet")
 
     async def _notify_companion_presence(self, *, offline: bool = False) -> None:
         hub = self._companion_hub()
@@ -1076,6 +1247,7 @@ class DeviceSession:
 
     def presence_snapshot(self) -> dict[str, Any]:
         online = not self._closed
+        away = self._departing if online else None
         payload: dict[str, Any] = {
             "type": "presence",
             "online": online,
@@ -1083,9 +1255,15 @@ class DeviceSession:
             "emotion": None if not online else self._emotion,
             "battery": self._battery,
             "charging": self._charging,
+            "sleeping": away == "sleeping",
+            "rebooting": away == "rebooting",
         }
         if not online:
             payload["hint"] = WAKE_HINT
+        elif away == "sleeping":
+            payload["hint"] = SLEEP_HINT
+        elif away == "rebooting":
+            payload["hint"] = REBOOT_HINT
         return payload
 
     async def refresh_status(self) -> None:
@@ -1117,14 +1295,35 @@ class DeviceSession:
         if self._closed:
             raise CompanionError("offline", "Mickey is offline.")
         payload = args or {}
-        async with self._companion_lock:
+        try:
             if kind == "stop":
                 return await self._companion_stop()
             if kind == "dance":
                 return await self._companion_dance(payload)
-            if kind == "rps_react":
-                return await self._companion_rps_react(payload)
-            raise CompanionError("invalid", "Unknown companion command.")
+            async with self._companion_lock:
+                if kind == "rps_react":
+                    return await self._companion_rps_react(payload)
+                if kind == "chat":
+                    return await self._companion_chat(payload)
+                if kind == "alarm_get":
+                    return await self._companion_alarm_get()
+                if kind == "alarm_set":
+                    return await self._companion_alarm_set(payload)
+                if kind == "alarm_cancel":
+                    return await self._companion_alarm_cancel()
+                if kind == "sleep":
+                    return await self._companion_sleep(payload)
+                if kind == "settings_get":
+                    return await self._companion_settings_get()
+                if kind == "settings_set":
+                    return await self._companion_settings_set(payload)
+                if kind == "reboot":
+                    return await self._companion_reboot()
+                if kind == "upgrade":
+                    return await self._companion_upgrade()
+                raise CompanionError("invalid", "Unknown companion command.")
+        finally:
+            await self._maybe_reconnect_owner_memory()
 
     def _motion_inhibited(self) -> bool:
         return time.monotonic() < self._motion_inhibited_until
@@ -1138,7 +1337,7 @@ class DeviceSession:
             await self.mcp.call("self.otto.stop", {})
         except (McpError, Exception) as exc:  # noqa: BLE001
             log.info("companion.stop_mcp_failed", session_id=self.session_id, error=str(exc))
-        if self.state.state == SessionState.SPEAKING:
+        if self.state.state in {SessionState.THINKING, SessionState.SPEAKING}:
             await self._abort(reason="companion_stop")
         return {"ok": True}
 
@@ -1156,25 +1355,282 @@ class DeviceSession:
             raise CompanionError("invalid", str(exc)) from exc
         return {"ok": True}
 
+    async def _rps_home(self, inhibited: bool) -> None:
+        if inhibited:
+            return
+        try:
+            await self.mcp.call("self.otto.action", rps_recover_motion())
+        except McpError as exc:
+            log.info("companion.rps_motion_failed", session_id=self.session_id, error=str(exc))
+
     async def _companion_rps_react(self, args: dict[str, Any]) -> dict[str, Any]:
         if self.state.state in {SessionState.THINKING, SessionState.SPEAKING}:
             raise CompanionError("busy", "Mickey is busy. Tap Stop first.")
-        winner = str(args.get("winner") or "draw")
-        plan = rps_plan(winner)
-        if self._motion_inhibited():
-            return {"ok": True, "skipped": True, "reason": "fall_inhibit"}
-        await self._apply_emotion(plan.think_emotion)
-        try:
-            await self.mcp.call("self.otto.action", rps_think_motion())
-            await self.mcp.call("self.otto.action", plan.motion)
-        except McpError as exc:
-            log.info("companion.rps_motion_failed", session_id=self.session_id, error=str(exc))
+        on_reveal = args.get("on_reveal")
         generation = self.state.generation
-        await self._speak(plan.line, generation, emotion=plan.end_emotion)
+        inhibited = self._motion_inhibited()
+        revealed = False
+        result: Any = None
+
+        async def reveal_web() -> Any:
+            nonlocal revealed, result
+            if revealed:
+                return result
+            revealed = True
+            if callable(on_reveal):
+                result = await on_reveal()
+            return result
+
+        await self._apply_emotion("thinking")
+
+        async def wind_up() -> None:
+            if inhibited:
+                return
+            try:
+                await self.mcp.call("self.otto.action", rps_think_motion())
+            except McpError as exc:
+                log.info("companion.rps_motion_failed", session_id=self.session_id, error=str(exc))
+
+        try:
+            await asyncio.gather(
+                self._speak(rps_countdown_line(), generation, emotion="thinking"),
+                wind_up(),
+            )
+        finally:
+            if generation == self.state.generation:
+                await reveal_web()
+
+        def _finish(payload: dict[str, Any]) -> dict[str, Any]:
+            if self.state.state != SessionState.CLOSED:
+                self._set_state(SessionState.READY, force=True)
+            return payload
+
+        if generation != self.state.generation:
+            return _finish({"ok": True, "aborted": True, "skipped": inhibited})
+
+        if isinstance(result, dict):
+            if result.get("aborted"):
+                return _finish({"ok": True, "aborted": True, "skipped": inhibited})
+            winner = result.get("winner")
+            timed_out = bool(result.get("timeout"))
+            match_over = result.get("phase") == "match_over"
+        else:
+            winner = str(args.get("winner") or "") or None
+            timed_out = False
+            match_over = False
+
+        if winner not in {"player", "mickey", "draw"}:
+            if timed_out:
+                await self._speak(rps_timeout_line(), generation, emotion="confused")
+            await self._rps_home(inhibited)
+            return _finish({"ok": True, "timeout": timed_out, "skipped": inhibited})
+
+        plan = rps_plan(str(winner), match_over=match_over)
         await self._apply_emotion(plan.end_emotion)
-        if self.state.state != SessionState.CLOSED:
-            self._set_state(SessionState.READY, force=True)
-        return {"ok": True}
+
+        async def react_body() -> None:
+            if inhibited:
+                return
+            try:
+                await self.mcp.call("self.otto.action", plan.motion)
+            except McpError as exc:
+                log.info("companion.rps_motion_failed", session_id=self.session_id, error=str(exc))
+                return
+            if plan.motion.get("action") == "sit":
+                await asyncio.sleep(RPS_SIT_HOLD_S)
+            if plan.motion.get("action") != "home":
+                await self._rps_home(False)
+
+        if generation == self.state.generation:
+            await asyncio.gather(
+                self._speak(plan.line, generation, emotion=plan.end_emotion),
+                react_body(),
+            )
+            await self._apply_emotion(plan.end_emotion)
+        return _finish({"ok": True, "skipped": inhibited})
+
+    async def _mcp_text(self, name: str, arguments: dict[str, Any] | None = None) -> str:
+        try:
+            return await self.mcp.call(name, arguments or {})
+        except McpError as exc:
+            raise CompanionError("invalid", str(exc)) from exc
+
+    async def _mcp_user_text(self, name: str, arguments: dict[str, Any] | None = None) -> str:
+        ensure = getattr(self.mcp, "ensure_user_tools", None)
+        if callable(ensure):
+            await ensure()
+        return await self._mcp_text(name, arguments)
+
+    def _mark_departing(self, reason: str) -> None:
+        self._departing = reason
+
+    def _upgrade_available(self) -> bool:
+        return can_upgrade(self.settings.resolved_firmware_url, self.settings.firmware_version)
+
+    async def _companion_alarm_get(self) -> dict[str, Any]:
+        text = await self._mcp_text("self.mickey.alarm.get", {})
+        return parse_alarm_state(text)
+
+    async def _companion_alarm_set(self, args: dict[str, Any]) -> dict[str, Any]:
+        payload = alarm_set_args(args)
+        await self._mcp_text("self.mickey.alarm.set", payload)
+        if payload.get("sleep_now"):
+            self._mark_departing("sleeping")
+            return {
+                "type": "alarm.state",
+                "set": True,
+                "hour": payload["hour"],
+                "minute": payload["minute"],
+                "repeat": payload["repeat"],
+            }
+        return await self._companion_alarm_get()
+
+    async def _companion_alarm_cancel(self) -> dict[str, Any]:
+        await self._mcp_text("self.mickey.alarm.cancel", {})
+        return parse_alarm_state("")
+
+    async def _companion_sleep(self, args: dict[str, Any]) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        if args:
+            try:
+                set_args = alarm_set_args(args)
+            except CompanionError:
+                set_args = None
+            if set_args:
+                payload = {"hour": set_args["hour"], "minute": set_args["minute"]}
+        await self._mcp_text("self.mickey.sleep.now", payload)
+        self._mark_departing("sleeping")
+        if payload:
+            return {
+                "type": "alarm.state",
+                "set": True,
+                "hour": payload["hour"],
+                "minute": payload["minute"],
+                "repeat": True,
+            }
+        return {"type": "alarm.state", "set": True, "hour": None, "minute": None, "repeat": True}
+
+    async def _companion_settings_get(self) -> dict[str, Any]:
+        text = ""
+        if "self.get_device_status" in self.mcp.tool_by_name:
+            text = await self._mcp_text("self.get_device_status", {})
+        state = parse_settings_state(
+            text,
+            firmware_version=self.settings.firmware_version,
+            can_upgrade=self._upgrade_available(),
+        )
+        if "self.otto.get_trims" in self.mcp.tool_by_name:
+            try:
+                state["trims"] = parse_trims(await self._mcp_text("self.otto.get_trims", {}))
+            except CompanionError:
+                state["trims"] = {}
+        try:
+            info = await self._mcp_user_text("self.get_system_info", {})
+            version = parse_firmware_version(info)
+            if version:
+                state["firmware_version"] = version
+        except CompanionError:
+            pass
+        return state
+
+    async def _companion_settings_set(self, args: dict[str, Any]) -> dict[str, Any]:
+        calls = settings_patch_calls(args)
+        for name, payload in calls:
+            await self._mcp_text(name, payload)
+        state = await self._companion_settings_get()
+        if "volume" in args and args.get("volume") is not None:
+            state["volume"] = int(args["volume"])
+        if "brightness" in args and args.get("brightness") is not None:
+            state["brightness"] = int(args["brightness"])
+        if args.get("theme") in {"light", "dark"}:
+            state["theme"] = args["theme"]
+        if args.get("press_to_talk") in {"press_to_talk", "click_to_talk"}:
+            state["press_to_talk"] = args["press_to_talk"]
+        if isinstance(args.get("trims"), dict):
+            merged = dict(state.get("trims") or {})
+            merged.update(args["trims"])
+            state["trims"] = merged
+        return state
+
+    async def _companion_reboot(self) -> dict[str, Any]:
+        await self._mcp_user_text("self.reboot", {})
+        self._mark_departing("rebooting")
+        return {"ok": True, "rebooting": True}
+
+    async def _companion_upgrade(self) -> dict[str, Any]:
+        url = firmware_upgrade_url(
+            self.settings.resolved_firmware_url,
+            self.settings.firmware_version,
+        )
+        await self._mcp_user_text("self.upgrade_firmware", {"url": url})
+        self._mark_departing("rebooting")
+        return {"ok": True, "upgrading": True}
+
+    async def _companion_chat(self, args: dict[str, Any]) -> dict[str, Any]:
+        if self.state.state in {SessionState.THINKING, SessionState.SPEAKING}:
+            raise CompanionError("busy", "Mickey is busy. Tap Stop first.")
+        if self.brain is None:
+            raise CompanionError("busy", "Mickey is still waking up. Wait a moment.")
+        send = getattr(self.brain, "send_text_turn", None)
+        if not callable(send):
+            raise CompanionError("invalid", "Chat is not available.")
+        text = str(args.get("text") or "").strip()
+        if not text:
+            raise CompanionError("invalid", "Type a message first.")
+        self._companion_user_text = text
+        self._tts_played = False
+        generation = self.state.generation
+        self._set_state(SessionState.THINKING, force=True)
+        speak_task = asyncio.create_task(self._consume_speakable(generation))
+        try:
+            result = await send(text)
+            if generation != self.state.generation:
+                return {"ok": True, "text": "", "emotion": self._emotion, "aborted": True}
+            result.input_text = text
+            if result.transient_disconnect or (
+                result.error and is_transient_gemini_error(result.error)
+            ):
+                log.info("session.chat_gemini_reconnecting", session_id=self.session_id)
+                raise CompanionError("busy", "Mickey lost that thought. Try again.")
+            if result.function_calls:
+                try:
+                    result = await asyncio.wait_for(
+                        self._handle_tools(result, generation, depth=0),
+                        timeout=max(20.0, self.settings.mcp_timeout_s + 12.0),
+                    )
+                except TimeoutError:
+                    log.warning("session.chat_tools_timeout", session_id=self.session_id)
+                    result = TurnResult(input_text=text, error="tools timeout")
+            if generation != self.state.generation:
+                return {"ok": True, "text": "", "emotion": self._emotion, "aborted": True}
+            reply = sanitize_for_tts(
+                cap_text((result.output_text or "").strip(), self.settings.max_tts_chars)
+            )
+            if result.error:
+                self._emotion = "sad"
+                await self.brain.enqueue_speakable(FALLBACK_BURMESE)
+                reply = sanitize_for_tts(FALLBACK_BURMESE)
+            elif not reply and not self._tts_played:
+                await self.brain.enqueue_speakable(FALLBACK_BURMESE)
+                reply = sanitize_for_tts(FALLBACK_BURMESE)
+            await self.brain.finish_speakable()
+            await speak_task
+            return {"ok": True, "text": reply, "emotion": self._emotion}
+        finally:
+            if not speak_task.done():
+                if self.brain:
+                    try:
+                        await self.brain.finish_speakable()
+                    except Exception:  # noqa: BLE001
+                        pass
+                speak_task.cancel()
+                try:
+                    await speak_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+            self._companion_user_text = None
+            if self.state.state != SessionState.CLOSED:
+                self._set_state(SessionState.READY, force=True)
 
     async def _consume_speakable(self, generation: int) -> None:
         """Speak Gemini sentences as they are published — do not wait for the full turn."""

@@ -18,7 +18,11 @@ def ota_and_bind(
     extra_json: dict | None = None,
 ) -> tuple[dict, str]:
     headers = device_headers(device_id, client_id)
-    response = client.post("/xiaozhi/ota/", headers=headers, json=extra_json or {"version": 2})
+    payload = extra_json or {
+        "version": 2,
+        "board": {"type": "mickey", "name": "mickey"},
+    }
+    response = client.post("/xiaozhi/ota/", headers=headers, json=payload)
     body = response.json()
     activation = body.get("activation")
     if isinstance(activation, dict) and activation.get("code"):

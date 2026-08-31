@@ -75,6 +75,10 @@ class Brain(Protocol):
         status: str = "completed",
     ) -> TurnResult: ...
 
+    async def send_text_turn(self, user_text: str) -> TurnResult: ...
+
+    def set_owner_context(self, prefix: str) -> None: ...
+
     async def cancel(self) -> None: ...
 
     async def close(self) -> None: ...
@@ -121,6 +125,10 @@ class GeminiLiveBrain:
         self._speak_q: asyncio.Queue[str | None] = asyncio.Queue()
         self._published_tts: list[str] = []
         self._speak_closed = False
+        self._owner_prefix = ""
+
+    def set_owner_context(self, prefix: str) -> None:
+        self._owner_prefix = (prefix or "").strip()
 
     async def configure_tools(self, declarations: list[dict[str, Any]]) -> None:
         self._tools = declarations
@@ -141,6 +149,10 @@ class GeminiLiveBrain:
 
         from app.ai.prompts import SYSTEM_PROMPT
 
+        instruction = SYSTEM_PROMPT
+        if self._owner_prefix:
+            instruction = f"{SYSTEM_PROMPT}\n\n{self._owner_prefix}"
+
         # Gemini 3.1 defaults to TURN_INCLUDES_AUDIO_ACTIVITY_AND_ALL_VIDEO.
         # With automatic VAD disabled that "audio activity" is empty, so the
         # model receives a turn with no PCM and replies that it heard nothing.
@@ -153,7 +165,7 @@ class GeminiLiveBrain:
             resumption = types.SessionResumptionConfig(handle=self._resumption_handle)
         return types.LiveConnectConfig(
             response_modalities=["AUDIO"],
-            system_instruction=SYSTEM_PROMPT,
+            system_instruction=instruction,
             thinking_config=types.ThinkingConfig(thinking_level="MINIMAL"),
             input_audio_transcription=types.AudioTranscriptionConfig(
                 language_codes=["my-MM", "my"]
@@ -423,6 +435,63 @@ class GeminiLiveBrain:
         await self.finish_speakable()
         log.info(
             "gemini.music_notify_complete",
+            gemini_output=finished.output_text,
+            function_calls=[c.name for c in finished.function_calls],
+        )
+        return finished
+
+    async def send_text_turn(self, user_text: str) -> TurnResult:
+        """Inject typed companion chat into the existing Live socket (no uplink PCM)."""
+        from google.genai import types
+
+        cleaned = " ".join((user_text or "").split()).strip()
+        if self._cancelled:
+            return TurnResult(input_text=cleaned)
+        try:
+            await self._ensure_session()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("gemini.text_turn_connect_failed", error=str(exc))
+            return TurnResult(error=str(exc), input_text=cleaned)
+        if self._session is None:
+            return TurnResult(error="gemini unavailable", input_text=cleaned)
+
+        self._streaming = False
+        self._activity_started = False
+        self._awaiting_tool_followup = False
+        self._turn = TurnResult(input_text=cleaned)
+        self._turn_done = asyncio.Event()
+        self._speak_q = asyncio.Queue()
+        self._published_tts = []
+        self._speak_closed = False
+        self._start_receive_loop()
+        try:
+            await asyncio.wait_for(
+                self._session.send_client_content(
+                    turns=types.Content(
+                        role="user",
+                        parts=[types.Part(text=cleaned)],
+                    ),
+                    turn_complete=True,
+                ),
+                timeout=self.settings.gemini_send_timeout_s,
+            )
+            log.info("gemini.text_turn_sent", chars=len(cleaned))
+            await asyncio.wait_for(self._turn_done.wait(), timeout=25)
+        except TimeoutError:
+            log.warning("gemini.text_turn_timeout")
+            await self.finish_speakable()
+            return TurnResult(input_text=cleaned, error="gemini timeout")
+        except Exception as exc:  # noqa: BLE001
+            if is_transient_gemini_error(exc):
+                await self._recover_after_transient(exc, restart_receive=True)
+                result = TurnResult(input_text=cleaned, transient_disconnect=True)
+                return result
+            log.warning("gemini.text_turn_failed", error=str(exc))
+            return TurnResult(error=str(exc), input_text=cleaned)
+        finished = self._turn or TurnResult()
+        finished.input_text = cleaned
+        log.info(
+            "gemini.text_turn_complete",
             gemini_output=finished.output_text,
             function_calls=[c.name for c in finished.function_calls],
         )

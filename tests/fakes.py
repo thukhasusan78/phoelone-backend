@@ -36,12 +36,34 @@ class FakeBrain:
         self._speak_closed = False
         self._last_output = ""
         self.music_finished: dict | None = None
+        self.text_turns: list[str] = []
+        self.owner_prefix = ""
 
     async def configure_tools(self, declarations: list[dict]) -> None:
         self.configured = declarations
 
+    def set_owner_context(self, prefix: str) -> None:
+        self.owner_prefix = (prefix or "").strip()
+
     async def ensure_connected(self) -> None:
-        return None
+        self.cancelled = False
+
+    async def send_text_turn(self, user_text: str) -> TurnResult:
+        cleaned = " ".join((user_text or "").split()).strip()
+        self.text_turns.append(cleaned)
+        self._speak_q = asyncio.Queue()
+        self._published_tts = []
+        self._speak_closed = False
+        result = TurnResult(
+            input_text=cleaned,
+            output_text="" if self.calls else self.output_text,
+            function_calls=list(self.calls),
+            error=self.error,
+            transient_disconnect=self.transient_disconnect,
+        )
+        self._last_output = result.output_text
+        self._flush_speakable(final=True)
+        return result
 
     async def begin_utterance(self) -> None:
         if self.begin_delay_s > 0:

@@ -97,4 +97,10 @@ async def portal_activate(request: Request):
     else:
         response = RedirectResponse(url="/", status_code=303)
     set_companion_cookie(response, settings, record.device_id, record.client_id)
+    hub = getattr(request.app.state, "companion", None)
+    if hub is not None:
+        try:
+            await hub.unlock(record.device_id, record.client_id, "first_activate")
+        except Exception:
+            pass
     return response

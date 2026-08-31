@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from app.config import Settings
+from app.mcp.catalog import USER_ONLY_TOOLS, is_forbidden
 from app.mcp.client import McpClient, McpError
 from app.mcp.tools import (
     enrich_discovered_tools,
@@ -175,6 +176,8 @@ class ToolRouter:
         if name in self.host:
             return await self._dispatch_host(name, arguments or {}, context=context)
         if name.startswith("self."):
+            if name in USER_ONLY_TOOLS or is_forbidden(name):
+                return {"error": f"Unknown tool: {name}"}
             tool = mcp.tool_by_name.get(name)
             if tool is None:
                 from app.mcp.catalog import catalog_entry

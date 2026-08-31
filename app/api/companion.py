@@ -113,12 +113,16 @@ async def companion_websocket(websocket: WebSocket) -> None:
     await websocket.accept()
     hub = websocket.app.state.companion
     device_id = identity.device_id
-    await hub.subscribe(device_id, websocket)
+    await hub.subscribe(device_id, websocket, client_id=identity.client_id)
     await websocket.send_json({"type": "hello", "device_id": device_id})
     await hub.push_presence(device_id)
     game = hub.current_game_state(device_id)
     if game:
         await websocket.send_json(game)
+    for line in hub.recent_chat(device_id):
+        await websocket.send_json(line)
+    for frame in await hub.bootstrap_frames(device_id, identity.client_id):
+        await websocket.send_json(frame)
     pulse = asyncio.create_task(hub.presence_loop(device_id, websocket))
     try:
         while True:
@@ -137,7 +141,7 @@ async def companion_websocket(websocket: WebSocket) -> None:
                 )
                 continue
             try:
-                await hub.handle(device_id, raw)
+                await hub.handle(device_id, raw, client_id=identity.client_id)
             except CompanionError as exc:
                 await websocket.send_json(error_frame(exc.code, exc.message))
             except Exception as exc:  # noqa: BLE001

@@ -4,6 +4,7 @@ import json
 
 import pytest
 from starlette.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from app.config import Settings
 from app.main import create_app
@@ -91,7 +92,7 @@ def _complete_hello(ws) -> str:
                     "result": {
                         "protocolVersion": "2024-11-05",
                         "capabilities": {"tools": {}},
-                        "serverInfo": {"name": "otto-robot", "version": "2.4.2"},
+                        "serverInfo": {"name": "mickey", "version": "2.4.2"},
                     },
                 },
             }
@@ -204,3 +205,30 @@ def test_websocket_rejects_bad_token(app) -> None:
                 },
             ):
                 pass
+
+
+def _expect_close(ws, code: int) -> None:
+    with pytest.raises(WebSocketDisconnect) as exc:
+        while True:
+            ws.receive_text()
+    assert exc.value.code == code
+
+
+def test_websocket_rejects_hello_version_2(app) -> None:
+    application, brain = app
+    with TestClient(application) as client:
+        application.state.brain_factory = lambda: brain
+        token = _token(client)
+        with _connect(client, token) as ws:
+            ws.send_text(json.dumps({**HELLO, "version": 2}))
+            _expect_close(ws, 1003)
+
+
+def test_websocket_rejects_features_aec(app) -> None:
+    application, brain = app
+    with TestClient(application) as client:
+        application.state.brain_factory = lambda: brain
+        token = _token(client)
+        with _connect(client, token) as ws:
+            ws.send_text(json.dumps({**HELLO, "features": {"mcp": True, "aec": True}}))
+            _expect_close(ws, 1003)

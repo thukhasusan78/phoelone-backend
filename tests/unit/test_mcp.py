@@ -149,3 +149,43 @@ async def test_mcp_notification_handler_exception_is_swallowed() -> None:
     client = McpClient("sid", send)
     client.set_notification_handler(boom)
     client.on_message({"jsonrpc": "2.0", "method": "notifications/other", "params": {}})
+
+
+async def test_list_user_tools_does_not_clobber_llm_catalog() -> None:
+    import orjson
+
+    client_holder: dict[str, McpClient] = {}
+
+    async def send(payload: str) -> None:
+        data = orjson.loads(payload)
+        rpc = data["payload"]
+        with_user = bool((rpc.get("params") or {}).get("withUserTools"))
+        tools = [
+            {
+                "name": "self.otto.stop",
+                "description": "stop",
+                "inputSchema": {"type": "object", "properties": {}},
+            }
+        ]
+        if with_user:
+            tools.append(
+                {
+                    "name": "self.reboot",
+                    "description": "reboot",
+                    "annotations": {"audience": ["user"]},
+                    "inputSchema": {"type": "object", "properties": {}},
+                }
+            )
+        client_holder["c"].on_message(
+            {"jsonrpc": "2.0", "id": rpc["id"], "result": {"tools": tools}}
+        )
+
+    client = McpClient("sid", send, timeout_s=1)
+    client_holder["c"] = client
+    await client.list_tools()
+    llm_names = set(client.tool_by_name)
+    assert "self.reboot" not in llm_names
+    await client.list_user_tools()
+    assert "self.reboot" in client.user_tool_by_name
+    assert set(client.tool_by_name) == llm_names
+    assert "self.reboot" not in client.tool_by_name

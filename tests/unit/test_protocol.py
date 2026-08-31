@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.protocol.messages import llm_emotion, server_hello, tts
+from app.protocol.messages import keepalive, llm_emotion, server_hello, tts
 from app.protocol.models import DeviceHello, ListenMessage, PongMessage
 
 
@@ -47,3 +47,15 @@ def test_pong_parse() -> None:
     assert msg.type == "pong"
     assert msg.ts_ms == 1710000000000
     assert msg.session_id == "abc"
+
+
+def test_keepalive_includes_ts_ms() -> None:
+    import json
+    import time
+
+    body = json.loads(keepalive("abc", ts_ms=1710000000000))
+    assert body == {"session_id": "abc", "type": "ping", "ts_ms": 1710000000000}
+    live = json.loads(keepalive("abc"))
+    assert live["type"] == "ping"
+    assert isinstance(live["ts_ms"], int)
+    assert abs(live["ts_ms"] - int(time.time() * 1000)) < 5_000
