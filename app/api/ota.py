@@ -30,6 +30,7 @@ def time_ms() -> int:
 
 
 def _ota_payload(settings: Settings, token: str) -> dict[str, Any]:
+    version, url = settings.advertised_firmware()
     return {
         "websocket": {
             "url": settings.websocket_url,
@@ -41,8 +42,8 @@ def _ota_payload(settings: Settings, token: str) -> dict[str, Any]:
             "timezone_offset": settings.timezone_offset_minutes,
         },
         "firmware": {
-            "version": settings.firmware_version,
-            "url": settings.resolved_firmware_url,
+            "version": version,
+            "url": url,
             "force": 0,
         },
     }

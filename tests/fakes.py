@@ -36,6 +36,7 @@ class FakeBrain:
         self._speak_closed = False
         self._last_output = ""
         self.music_finished: dict | None = None
+        self.pet_events: list[str] = []
         self.text_turns: list[str] = []
         self.owner_prefix = ""
 
@@ -159,6 +160,12 @@ class FakeBrain:
             self._speak_closed = True
             await self._speak_q.put(None)
         return TurnResult(output_text=wrap)
+
+    async def notify_pet(self) -> TurnResult:
+        from app.ai.gemini import PET_INTERNAL_EVENT
+
+        self.pet_events.append(PET_INTERNAL_EVENT)
+        return await self.send_text_turn(PET_INTERNAL_EVENT)
 
     async def finish_speakable(self) -> None:
         self._flush_speakable(final=True)

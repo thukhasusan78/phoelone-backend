@@ -10,7 +10,7 @@ from redis.asyncio import Redis
 
 from app.ai.gemini import GeminiLiveBrain, KeyPool
 from app.ai.tool_router import ToolRouter
-from app.api import companion, health, ota, portal, vision, websocket
+from app.api import companion, firmware, health, ota, portal, vision, websocket
 from app.audio.edge_tts import EdgeTtsClient
 from app.audio.opus import ffmpeg_available
 from app.auth.service import AuthService
@@ -149,6 +149,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     application.state.settings = settings
     application.include_router(health.router)
+    application.include_router(firmware.router)
     application.include_router(portal.router)
     application.include_router(companion.router)
     application.include_router(ota.router)

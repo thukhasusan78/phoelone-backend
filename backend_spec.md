@@ -147,7 +147,7 @@ The device parses these **top-level objects**. Unknown keys are ignored. String/
 | `websocket.version` | Optional number | NVS `websocket`/`version`. `1` (default raw Opus), `2`, or `3`. |
 | `mqtt.*` | Only if using MQTT transport | Every string/number child is stored under NVS `mqtt`. If omitted, device logs “No mqtt section”. |
 | `server_time.timestamp` | Recommended | Milliseconds. Device adds `timezone_offset` minutes then `settimeofday`. Myanmar offset example: `390`. |
-| `firmware.version` + `firmware.url` | Recommended | If `version` is **newer** than running firmware, device starts OTA download. Use a dummy version `0.0.0` and a non-downloadable URL to skip upgrades. `force: 1` forces install even if not newer. |
+| `firmware.version` + `firmware.url` | Recommended | If `version` is **newer** than running firmware, device starts OTA download (`GET` the URL, HTTP 200, `Content-Length` > 0). Lab default is `0.0.0` + `/firmware/none.bin` (404) so upgrades are skipped. Publish a real image under `data/firmware/` and set `FIRMWARE_VERSION` / `FIRMWARE_URL`; `GET /firmware/{name}` serves `application/octet-stream`. `force: 1` forces install even if not newer — do not use in production defaults. |
 | `activation` | Pending devices only | If `code` is present, the robot shows the activation UI and plays digit sounds, then polls `POST /xiaozhi/ota/activate`. **Omit this object once the device is bound**, or the firmware stays on the activation screen. DIY Otto boards have no eFuse HMAC: `Activation-Version: 1` and activate body `{}`. |
 
 ### 2.4 Device activation poll and web portal
@@ -482,7 +482,7 @@ Always wrap JSON-RPC in:
 
 `payload.jsonrpc` **must** be `"2.0"`. Request/response `payload.id` **must** be a JSON **number** (not a string). JSON-RPC notifications have **no** `id`.
 
-Device-initiated methods starting with `notifications/` are handled, not ignored. In particular `notifications/phoe_lone.event` is parsed and logged (`event`: `pickup` | `putdown` | `fall` | `pet` | `bright` | `dark`). The server **must not** send a JSON-RPC reply. Unknown notification methods are logged and dropped. Old firmware that never sends notifications remains valid.
+Device-initiated methods starting with `notifications/` are handled, not ignored. In particular `notifications/phoe_lone.event` is parsed (`event`: `pickup` | `putdown` | `fall` | `pet` | `sleep`). Firmware does **not** emit `bright` / `dark`. The server **must not** send a JSON-RPC reply. Unknown notification methods are logged and dropped. Old firmware that never sends notifications remains valid. `event: sleep` is emitted ~400 ms before the socket closes; the dashboard must show sleeping until the device reconnects, not a generic offline error.
 
 ```json
 {
@@ -664,12 +664,9 @@ Registered by `AddUserOnlyTools`. List only with `withUserTools: true`. Do not g
 
 Snapshot/preview require `CONFIG_LV_USE_SNAPSHOT`.
 
-### 5.7 Press-to-talk (if the board constructs `PressToTalkMcpTool`)
+### 5.7 Press-to-talk
 
-#### `self.set_press_to_talk`
-
-- `mode`: `"press_to_talk"` or `"click_to_talk"`
-- Saved in NVS `vendor`/`press_to_talk`
+Mickey does **not** register `self.set_press_to_talk`. The dashboard must not offer Hold-to-Talk / Tap-to-Talk for this SKU.
 
 ### 5.8 Otto / Phoe Lone motion tools (`otto_controller.cc`)
 
@@ -924,7 +921,7 @@ Do not send these frames to the ESP32. The hub translates them to existing XiaoZ
 | `care.state` | `happiness`, `energy`, `bond`, `streak_days`, `updated_at` |
 | `achieve.unlock` | `code`, `title` — once when a badge is earned |
 | `alarm.state` | `set`, `hour`, `minute`, `repeat` — robot clock; never a server cron |
-| `settings.state` | `volume`, `brightness`, `theme`, `press_to_talk`, `firmware_version`, `can_upgrade` |
+| `settings.state` | `volume`, `brightness`, `theme`, `firmware_version`, `can_upgrade` |
 
 **Browser → server**
 
@@ -944,11 +941,11 @@ Do not send these frames to the ESP32. The hub translates them to existing XiaoZ
 | `alarm.cancel` | none |
 | `sleep.now` | optional `hour`, `minute` — empty uses the stored alarm |
 | `settings.get` | none — volume / brightness / theme from `self.get_device_status` |
-| `settings.set` | optional `volume`, `brightness`, `theme`, `press_to_talk`, optional `trims` (`left_leg` / `right_leg` / `left_foot` / `right_foot`, -50 to 50) |
+| `settings.set` | optional `volume`, `brightness`, `theme`, optional `trims` (`left_leg` / `right_leg` / `left_foot` / `right_foot`, -50 to 50) |
 | `settings.reboot` | none — `self.reboot` (confirm in the UI) |
 | `settings.upgrade` | none — server supplies `FIRMWARE_URL`; refused if unpublished (`0.0.0` / `none.bin`); no client `url` or `force` |
 
-If the device session is absent, commands fail with `offline` and presence shows “Wake Mickey (button or wake word), then play.” After `sleep.now` / `alarm.set sleep_now` the session may still be open: presence stays connected with `sleeping: true` and hint “Mickey is sleeping…” until the device socket closes (do not fake `offline` while the session is live). A dashboard viewer holds the device idle timeout so a silent READY session is not closed mid-game. Game rules run on the server; Gemini is not in this path.
+If the device session is absent, commands fail with `offline` and presence shows “Wake Mickey (button or wake word), then play.” Firmware emits `notifications/phoe_lone.event` with `"event":"sleep"` then closes the socket. The hub keeps `sleeping: true` after that close (hint “Mickey is sleeping…”) until the device hellos again. After dashboard `sleep.now` / `alarm.set sleep_now` the session may still be open briefly with `sleeping: true`. A dashboard viewer holds the device idle timeout so a silent READY session is not closed mid-game. Game rules run on the server; Gemini is not in this path.
 
 RPS is chant-first on the existing companion pipe: `game.start` (or `game.round`) broadcasts `phase: countdown` with both throws hidden while the device speaks `tts` “Rock… Paper… Scissors!” on `/xiaozhi/v1/`. The owner taps `game.move` *during* that chant. When countdown TTS finishes, the hub broadcasts the result `game.state`; Mickey’s jump/sit/home reaction and a win/lose/draw `tts` line start on the same tick, then `home` returns him to stand. First to 2 of 3 wins; `match_over` + `match_winner` end the match until `game.start`.
 
@@ -956,7 +953,7 @@ Phone chat reuses the device Gemini Live socket (`send_client_content`, no secon
 
 Owner memory is per `device_id` + `client_id` and is injected into Gemini `system_instruction` at Live configure (not by mutating the global prompt string). Care meters decay from a lifespan `asyncio` task about every 8 minutes. Achievements are an event log (`first_activate`, `first_web_dance`, `first_rps_win`, `chat_streak_3`, `first_pet`).
 
-Alarm and settings are device MCP on the same companion pipe. `alarm.*` maps to `self.mickey.alarm.*` / `self.mickey.sleep.now`; the robot clock is source of truth (offline → `error.offline`, no server-side cron). `settings.set` uses volume/brightness/theme/press-to-talk plus optional `trims`. `settings.reboot` and `settings.upgrade` list user-only tools with `withUserTools: true` on a separate map (never `gemini_tools`). Upgrade never accepts a URL from the browser.
+Alarm and settings are device MCP on the same companion pipe. `alarm.*` maps to `self.mickey.alarm.*` / `self.mickey.sleep.now`; the robot clock is source of truth (offline → `error.offline`, no server-side cron). `settings.set` uses volume/brightness/theme plus optional `trims`. `settings.reboot` and `settings.upgrade` list user-only tools with `withUserTools: true` on a separate map (never `gemini_tools`). Upgrade never accepts a URL from the browser. Do not call `self.set_press_to_talk`.
 
 ---
 

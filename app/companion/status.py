@@ -60,9 +60,6 @@ def parse_settings_state(
     data = _as_dict(text)
     speaker = data.get("audio_speaker") if isinstance(data.get("audio_speaker"), dict) else data
     screen = data.get("screen") if isinstance(data.get("screen"), dict) else data
-    mode = data.get("press_to_talk", data.get("talk_mode", data.get("mode")))
-    if mode not in {"press_to_talk", "click_to_talk"}:
-        mode = None
     theme = screen.get("theme") if isinstance(screen, dict) else None
     if theme not in {"light", "dark"}:
         theme = None
@@ -73,7 +70,6 @@ def parse_settings_state(
         "volume": _int_or_none(volume, 0, 100),
         "brightness": _int_or_none(brightness, 0, 100),
         "theme": theme,
-        "press_to_talk": mode,
         "firmware_version": firmware_version or None,
         "can_upgrade": bool(can_upgrade),
         "trims": {},
@@ -113,11 +109,6 @@ def settings_patch_calls(message: dict[str, Any]) -> list[tuple[str, dict[str, A
         if theme not in {"light", "dark"}:
             raise CompanionError("invalid", "Theme is light or dark.")
         calls.append(("self.screen.set_theme", {"theme": theme}))
-    if "press_to_talk" in message and message.get("press_to_talk") is not None:
-        mode = str(message.get("press_to_talk") or "")
-        if mode not in {"press_to_talk", "click_to_talk"}:
-            raise CompanionError("invalid", "Talk mode is tap or hold.")
-        calls.append(("self.set_press_to_talk", {"mode": mode}))
     trims = message.get("trims")
     if isinstance(trims, dict):
         for servo, raw in trims.items():

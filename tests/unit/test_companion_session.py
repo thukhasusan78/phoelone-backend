@@ -28,7 +28,6 @@ class RecordingMcp:
             "self.audio_speaker.set_volume": {},
             "self.screen.set_brightness": {},
             "self.screen.set_theme": {},
-            "self.set_press_to_talk": {},
             "self.otto.get_trims": {},
             "self.otto.set_trim": {},
             "self.reboot": {},

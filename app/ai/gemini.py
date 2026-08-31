@@ -11,6 +11,13 @@ from app.observability.metrics import UPSTREAM_ERRORS
 
 log = get_logger(__name__)
 
+PET_INTERNAL_EVENT = (
+    "INTERNAL EVENT: the owner is petting your head (touch). "
+    "This is not microphone speech. Do not call otto motion tools. "
+    "You MAY set_emotion happy. "
+    "Reply with one short spoken Burmese sentence. Never reply empty."
+)
+
 _RECONNECT_DELAYS_S = (0.3, 0.8, 2.0)
 
 
@@ -76,6 +83,8 @@ class Brain(Protocol):
     ) -> TurnResult: ...
 
     async def send_text_turn(self, user_text: str) -> TurnResult: ...
+
+    async def notify_pet(self) -> TurnResult: ...
 
     def set_owner_context(self, prefix: str) -> None: ...
 
@@ -496,6 +505,10 @@ class GeminiLiveBrain:
             function_calls=[c.name for c in finished.function_calls],
         )
         return finished
+
+    async def notify_pet(self) -> TurnResult:
+        """Owner head-touch from firmware; same Live socket, no uplink PCM."""
+        return await self.send_text_turn(PET_INTERNAL_EVENT)
 
     async def cancel(self) -> None:
         self._cancelled = True

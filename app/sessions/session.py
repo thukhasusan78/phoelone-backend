@@ -17,7 +17,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 from starlette.websockets import WebSocketState
 
-from app.ai.gemini import Brain, FunctionCall, TurnResult, is_transient_gemini_error
+from app.ai.gemini import Brain, FunctionCall, TurnResult, is_transient_gemini_error, PET_INTERNAL_EVENT
 from app.ai.tool_router import ToolRouter, canonical_tool_name
 from app.audio.edge_tts import EdgeTtsClient, TtsError
 from app.audio.opus import (
@@ -98,10 +98,12 @@ from app.tools.otto_gate import (
 log = get_logger(__name__)
 
 _MUSIC_DONE_BURMESE = "သီချင်း ပြီးသွားပါပြီနော်။"
+_PET_BURMESE = "ပွေ့ပေးလို့ ဝမ်းသာတယ်နော်။"
 
-_SENSOR_EVENTS = frozenset({"pickup", "putdown", "fall", "pet", "bright", "dark"})
+_SENSOR_EVENTS = frozenset({"pickup", "putdown", "fall", "pet", "sleep"})
 _SENSOR_MIN_INTERVAL_S = 0.5
 _FALL_INHIBIT_S = 5.0
+_KEEPALIVE_GENERATION = -1
 
 # Uplink Opus frame is 60 ms @ 16 kHz mono PCM16.
 _UPLINK_FRAME_SECONDS = 0.06
@@ -246,6 +248,8 @@ class DeviceSession:
         self.out_queue: asyncio.Queue[Outbound | None] = asyncio.Queue(settings.outbound_queue_size)
         self._writer_task: asyncio.Task | None = None
         self._keepalive_task: asyncio.Task | None = None
+        self._ws_lock = asyncio.Lock()
+        self._pet_task: asyncio.Task | None = None
         self._turn_task: asyncio.Task | None = None
         self._listen_started_at = 0.0
         self._utterance_bytes = 0
@@ -425,7 +429,7 @@ class DeviceSession:
             except Exception:  # noqa: BLE001
                 pass
         SESSIONS_ACTIVE.dec()
-        await self._notify_companion_presence(offline=True)
+        await self._notify_companion_presence()
 
     async def _handshake(self) -> None:
         try:
@@ -600,10 +604,17 @@ class DeviceSession:
         if event == "fall":
             self._motion_inhibited_until = now + _FALL_INHIBIT_S
             return
+        if event == "sleep":
+            self._mark_departing("sleeping")
+            self._schedule_presence_broadcast()
+            return
         if event in {"pet", "pickup"}:
             try:
                 loop = asyncio.get_running_loop()
                 loop.create_task(self._credit_sensor_care(event))
+                if event == "pet":
+                    if self._pet_task is None or self._pet_task.done():
+                        self._pet_task = loop.create_task(self._react_to_pet())
             except RuntimeError:
                 pass
             return
@@ -1236,6 +1247,78 @@ class DeviceSession:
     async def _credit_sensor_care(self, _event: str) -> None:
         await self._credit_interaction("pet")
 
+    def _pet_busy(self) -> bool:
+        if self._closed or self.brain is None:
+            return True
+        if self.state.state != SessionState.READY:
+            return True
+        if self._companion_lock.locked():
+            return True
+        if self._turn_task is not None and not self._turn_task.done():
+            return True
+        return False
+
+    async def _react_to_pet(self) -> None:
+        if self._pet_busy():
+            return
+        notify = getattr(self.brain, "notify_pet", None)
+        send = getattr(self.brain, "send_text_turn", None)
+        if not callable(notify) and not callable(send):
+            return
+        generation = self.state.generation
+        self._set_state(SessionState.THINKING, force=True)
+        speak_task = asyncio.create_task(self._consume_speakable(generation))
+        try:
+            if callable(notify):
+                result = await notify()
+            else:
+                result = await send(PET_INTERNAL_EVENT)
+            if generation != self.state.generation or self._closed:
+                return
+            if result.function_calls:
+                keep = [
+                    call
+                    for call in result.function_calls
+                    if not canonical_tool_name(call.name).startswith("self.otto.")
+                    and canonical_tool_name(call.name) != "search_music"
+                ]
+                if keep:
+                    result.function_calls = keep
+                    try:
+                        result = await self._handle_tools(result, generation, depth=0)
+                    except Exception as exc:  # noqa: BLE001
+                        log.warning("session.pet_tools_failed", error=str(exc))
+                if generation != self.state.generation:
+                    return
+            text = sanitize_for_tts(
+                cap_text((result.output_text or "").strip(), self.settings.max_tts_chars)
+            )
+            if not text:
+                text = _PET_BURMESE
+                if self.brain:
+                    await self.brain.enqueue_speakable(text)
+            if self.brain:
+                await self.brain.finish_speakable()
+            await speak_task
+            if not self._tts_played and generation == self.state.generation:
+                await self._speak(text, generation, emotion="happy")
+        except Exception as exc:  # noqa: BLE001
+            log.info("session.pet_react_failed", error=str(exc), session_id=self.session_id)
+        finally:
+            if not speak_task.done():
+                if self.brain:
+                    try:
+                        await self.brain.finish_speakable()
+                    except Exception:  # noqa: BLE001
+                        pass
+                speak_task.cancel()
+                try:
+                    await speak_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+            if self.state.state != SessionState.CLOSED and generation == self.state.generation:
+                self._set_state(SessionState.READY, force=True)
+
     async def _notify_companion_presence(self, *, offline: bool = False) -> None:
         hub = self._companion_hub()
         if hub is None:
@@ -1463,9 +1546,17 @@ class DeviceSession:
 
     def _mark_departing(self, reason: str) -> None:
         self._departing = reason
+        hub = self._companion_hub()
+        if hub is None:
+            return
+        if reason == "sleeping":
+            hub.mark_asleep(self.device_id)
+        elif reason == "rebooting":
+            hub.mark_awake(self.device_id)
 
     def _upgrade_available(self) -> bool:
-        return can_upgrade(self.settings.resolved_firmware_url, self.settings.firmware_version)
+        version, url = self.settings.advertised_firmware()
+        return can_upgrade(url, version)
 
     async def _companion_alarm_get(self) -> dict[str, Any]:
         text = await self._mcp_text("self.mickey.alarm.get", {})
@@ -1544,8 +1635,6 @@ class DeviceSession:
             state["brightness"] = int(args["brightness"])
         if args.get("theme") in {"light", "dark"}:
             state["theme"] = args["theme"]
-        if args.get("press_to_talk") in {"press_to_talk", "click_to_talk"}:
-            state["press_to_talk"] = args["press_to_talk"]
         if isinstance(args.get("trims"), dict):
             merged = dict(state.get("trims") or {})
             merged.update(args["trims"])
@@ -1558,10 +1647,8 @@ class DeviceSession:
         return {"ok": True, "rebooting": True}
 
     async def _companion_upgrade(self) -> dict[str, Any]:
-        url = firmware_upgrade_url(
-            self.settings.resolved_firmware_url,
-            self.settings.firmware_version,
-        )
+        version, url = self.settings.advertised_firmware()
+        url = firmware_upgrade_url(url, version)
         await self._mcp_user_text("self.upgrade_firmware", {"url": url})
         self._mark_departing("rebooting")
         return {"ok": True, "upgrading": True}
@@ -2176,20 +2263,35 @@ class DeviceSession:
             return
         await self.out_queue.put(item)
 
+    def _should_send(self, item: Outbound) -> bool:
+        if item.generation == _KEEPALIVE_GENERATION:
+            return True
+        return item.generation == self.state.generation
+
+    async def _send_outbound(self, item: Outbound) -> bool:
+        if self._closed:
+            return False
+        async with self._ws_lock:
+            if self._closed:
+                return False
+            try:
+                if item.kind == "bytes":
+                    await self.ws.send_bytes(item.payload)  # type: ignore[arg-type]
+                else:
+                    await self.ws.send_text(item.payload)  # type: ignore[arg-type]
+                return True
+            except Exception:
+                return False
+
     async def _writer_loop(self) -> None:
         while True:
             item = await self.out_queue.get()
             QUEUE_DEPTH.labels(queue="outbound").set(self.out_queue.qsize())
             if item is None:
                 return
-            if item.generation != self.state.generation:
+            if not self._should_send(item):
                 continue
-            try:
-                if item.kind == "bytes":
-                    await self.ws.send_bytes(item.payload)  # type: ignore[arg-type]
-                else:
-                    await self.ws.send_text(item.payload)  # type: ignore[arg-type]
-            except Exception:
+            if not await self._send_outbound(item):
                 return
 
     async def _keepalive_loop(self) -> None:
@@ -2224,7 +2326,10 @@ class DeviceSession:
                         )
                         await self.close()
                         return
-                await self._queue_json(keepalive(self.session_id))
+                ping = Outbound("json", keepalive(self.session_id), _KEEPALIVE_GENERATION)
+                if not await self._send_outbound(ping):
+                    await self.close()
+                    return
         except asyncio.CancelledError:
             return
 
@@ -2250,6 +2355,13 @@ class SessionManager:
             if previous is None and len(self._by_device) >= self.settings.max_concurrent_sessions:
                 raise RuntimeError("too many sessions")
             self._by_device[session.device_id] = session
+        hub = None
+        try:
+            hub = getattr(session.ws.app.state, "companion", None)
+        except Exception:  # noqa: BLE001
+            hub = None
+        if hub is not None:
+            hub.mark_awake(session.device_id)
         if previous and previous is not session:
             await previous.close()
 

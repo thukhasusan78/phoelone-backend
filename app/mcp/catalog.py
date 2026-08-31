@@ -89,20 +89,6 @@ LLM_TOOLS: dict[str, dict[str, Any]] = {
             ["theme"],
         ),
     },
-    "self.set_press_to_talk": {
-        "name": "self.set_press_to_talk",
-        "description": "Switch listening mode between press_to_talk and click_to_talk.",
-        "inputSchema": _object(
-            {
-                "mode": {
-                    "type": "string",
-                    "enum": ["press_to_talk", "click_to_talk"],
-                    "description": "Listening mode",
-                }
-            },
-            ["mode"],
-        ),
-    },
     "self.otto.action": {
         "name": "self.otto.action",
         "description": (

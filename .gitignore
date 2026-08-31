@@ -55,6 +55,9 @@ debug_last_utterance.wav
 # Local music library (keep the folder via .gitkeep)
 data/local_music/*
 !data/local_music/.gitkeep
+# Published OTA images (keep the folder via .gitkeep)
+data/firmware/*
+!data/firmware/.gitkeep
 *.mp3
 *.wav
 *.m4a

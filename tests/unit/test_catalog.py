@@ -51,6 +51,7 @@ def test_system_prompt_is_english() -> None:
     spoken_name = "Your spoken name is Mickey."
     assert spoken_name in SYSTEM_PROMPT
     assert "Never say you are Phoe Lone" in SYSTEM_PROMPT
+    assert "petting your head" in SYSTEM_PROMPT
     assert MYANMAR.search(SYSTEM_PROMPT) is None
     for name in (
         "self.otto.action",
@@ -71,6 +72,7 @@ def test_system_prompt_is_english() -> None:
 
 def test_catalog_covers_spec_tools() -> None:
     assert REQUIRED_DEVICE_TOOLS <= set(LLM_TOOLS)
+    assert "self.set_press_to_talk" not in LLM_TOOLS
     assert SENSOR_DEVICE_TOOLS <= set(LLM_TOOLS)
     assert REQUIRED_DEVICE_TOOLS <= set(PHOE_LONE_FALLBACK_NAMES)
     assert SENSOR_DEVICE_TOOLS.isdisjoint(PHOE_LONE_FALLBACK_NAMES)

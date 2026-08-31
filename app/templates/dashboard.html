@@ -379,10 +379,6 @@
         <button class="ghost needs-mickey" type="button" id="theme-dark">Dark face</button>
         <button class="ghost needs-mickey" type="button" id="theme-light">Light face</button>
       </div>
-      <div class="row" style="margin-bottom: 10px">
-        <button class="ghost needs-mickey" type="button" id="talk-click">Tap to talk</button>
-        <button class="ghost needs-mickey" type="button" id="talk-press">Hold to talk</button>
-      </div>
       <p class="score" id="fw-version">Firmware —</p>
       <div class="meters" id="trim-meters">
         <div class="meter"><span>Left leg <em id="trim-left_leg-label">0</em></span><input id="trim-left_leg" class="needs-mickey" type="range" min="-50" max="50" value="0"></div>
@@ -558,8 +554,6 @@
       }
       document.getElementById("theme-dark").classList.toggle("picked", msg.theme === "dark");
       document.getElementById("theme-light").classList.toggle("picked", msg.theme === "light");
-      document.getElementById("talk-click").classList.toggle("picked", msg.press_to_talk === "click_to_talk");
-      document.getElementById("talk-press").classList.toggle("picked", msg.press_to_talk === "press_to_talk");
       document.getElementById("fw-version").textContent = "Firmware " + (msg.firmware_version || "—");
       canUpgrade = !!msg.can_upgrade;
       const trims = msg.trims || {};
@@ -782,9 +776,8 @@
       socket.onclose = () => {
         linkState.textContent = "Reconnecting…";
         online = false;
-        sleeping = false;
         deviceState = "";
-        applyPresence({ online: false, sleeping: false });
+        applyPresence({ online: false, sleeping: sleeping });
         const wait = backoff;
         backoff = Math.min(backoff * 2, 8000);
         setTimeout(connect, wait);
@@ -820,7 +813,10 @@
         } else if (msg.type === "error") {
           showError(msg.message || "Something went wrong.");
           chatBusy = false;
-          if (msg.code === "offline") applyPresence({ online: false, sleeping: false, hint: msg.message });
+          if (msg.code === "offline") {
+            const stillSleeping = sleeping || (msg.message || "").toLowerCase().includes("sleeping");
+            applyPresence({ online: false, sleeping: stillSleeping, hint: msg.message });
+          }
           if (rpsPhase === "countdown" && msg.code === "invalid") {
             stopRpsCountdown();
             rpsPhase = "awaiting_throw";
@@ -931,12 +927,6 @@
     });
     document.getElementById("theme-light").addEventListener("click", () => {
       send({ type: "settings.set", theme: "light" });
-    });
-    document.getElementById("talk-click").addEventListener("click", () => {
-      send({ type: "settings.set", press_to_talk: "click_to_talk" });
-    });
-    document.getElementById("talk-press").addEventListener("click", () => {
-      send({ type: "settings.set", press_to_talk: "press_to_talk" });
     });
     document.getElementById("btn-reboot").addEventListener("click", () => {
       if (!window.confirm("Reboot Mickey now?")) return;

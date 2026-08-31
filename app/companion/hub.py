@@ -39,7 +39,7 @@ def device_idle_exempt(state: SessionState, has_viewers: bool) -> bool:
     return has_viewers
 
 
-def offline_presence() -> dict[str, Any]:
+def offline_presence(*, sleeping: bool = False) -> dict[str, Any]:
     return {
         "type": "presence",
         "online": False,
@@ -47,8 +47,8 @@ def offline_presence() -> dict[str, Any]:
         "emotion": None,
         "battery": None,
         "charging": None,
-        "sleeping": False,
-        "hint": WAKE_HINT,
+        "sleeping": sleeping,
+        "hint": SLEEP_HINT if sleeping else WAKE_HINT,
     }
 
 
@@ -66,6 +66,7 @@ class CompanionHub:
         self._rps_tasks: dict[str, asyncio.Task] = {}
         self._chat: dict[str, list[dict[str, Any]]] = {}
         self._care_tap_at: dict[str, float] = {}
+        self._asleep: set[str] = set()
         self._lock = asyncio.Lock()
 
     def has_viewers(self, device_id: str) -> bool:
@@ -73,6 +74,15 @@ class CompanionHub:
 
     def viewer_ids(self) -> list[str]:
         return list(self._viewers.keys())
+
+    def is_asleep(self, device_id: str) -> bool:
+        return device_id.lower() in self._asleep
+
+    def mark_asleep(self, device_id: str) -> None:
+        self._asleep.add(device_id.lower())
+
+    def mark_awake(self, device_id: str) -> None:
+        self._asleep.discard(device_id.lower())
 
     async def subscribe(
         self, device_id: str, websocket: WebSocket, *, client_id: str = ""
@@ -118,8 +128,10 @@ class CompanionHub:
 
     async def push_presence(self, device_id: str, *, offline: bool = False) -> None:
         session = self.sessions.get(device_id)
-        if offline or session is None or session.closed:
-            await self.broadcast(device_id, offline_presence())
+        asleep = self.is_asleep(device_id)
+        live = session is not None and not session.closed
+        if offline or not live:
+            await self.broadcast(device_id, offline_presence(sleeping=asleep))
             return
         departing = getattr(session, "departing", None)
         if not departing:
@@ -259,7 +271,7 @@ class CompanionHub:
         if session is None or session.closed:
             if aborted:
                 await self.broadcast(device_id, aborted)
-            await self.broadcast(device_id, offline_presence())
+            await self.broadcast(device_id, offline_presence(sleeping=self.is_asleep(device_id)))
             return
         await session.companion_action("stop", {})
         if aborted:
@@ -527,6 +539,8 @@ class CompanionHub:
     def _require_session(self, device_id: str, hint: str = WAKE_HINT):
         session = self.sessions.get(device_id)
         if session is None or session.closed:
+            if self.is_asleep(device_id):
+                raise CompanionError("offline", SLEEP_HINT)
             raise CompanionError("offline", hint)
         return session
 

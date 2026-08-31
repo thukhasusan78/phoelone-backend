@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
+from urllib.parse import urlparse
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -52,6 +54,7 @@ class Settings(BaseSettings):
     default_weather_location: str = ""
     firmware_version: str = "0.0.0"
     firmware_url: str = ""
+    firmware_dir: str = "data/firmware"
 
     tavily_key: str = ""
     openweather_api_key: str = ""
@@ -171,6 +174,28 @@ class Settings(BaseSettings):
         if self.firmware_url:
             return self.firmware_url
         return f"{self.public_http_origin}/firmware/none.bin"
+
+    @property
+    def firmware_root(self) -> Path:
+        return Path(self.firmware_dir)
+
+    def advertised_firmware(self) -> tuple[str, str]:
+        dummy = f"{self.public_http_origin}/firmware/none.bin"
+        version = (self.firmware_version or "").strip() or "0.0.0"
+        url = self.resolved_firmware_url
+        if version in {"", "0.0.0"}:
+            return "0.0.0", dummy
+        name = Path(urlparse(url).path).name
+        if not name or name == "none.bin":
+            return "0.0.0", dummy
+        try:
+            root = self.firmware_root.resolve()
+            path = (root / name).resolve()
+        except OSError:
+            return "0.0.0", dummy
+        if path.parent != root or not path.is_file():
+            return "0.0.0", dummy
+        return version, url
 
     @property
     def uses_memory_db(self) -> bool:

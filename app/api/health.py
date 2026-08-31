@@ -59,8 +59,3 @@ async def metrics(
         if not authorization or not hmac.compare_digest(authorization, expected):
             raise HTTPException(status_code=401, detail="unauthorized")
     return PlainTextResponse(metrics_payload(), media_type="text/plain; version=0.0.4")
-
-
-@router.get("/firmware/none.bin")
-async def dummy_firmware() -> Response:
-    return Response(status_code=404)

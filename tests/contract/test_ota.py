@@ -277,3 +277,67 @@ def test_ota_accepts_mickey_board_type(client) -> None:
     assert "mqtt" not in body
     assert body["websocket"]["token"]
     assert body["firmware"]["force"] == 0
+
+
+def test_dummy_firmware_bin_is_404(client) -> None:
+    ac, _ = client
+    response = ac.get("/firmware/none.bin")
+    assert response.status_code == 404
+
+
+def test_firmware_bin_served_and_advertised(tmp_path) -> None:
+    blob = b"esp-firmware-image" + b"\x00" * 128
+    (tmp_path / "mickey.bin").write_bytes(blob)
+    application = create_app(
+        Settings(
+            environment="test",
+            database_url="memory://",
+            allow_auto_provision=True,
+            auth_pepper="pepper",
+            gemini_api_keys="k",
+            public_http_origin="http://testserver",
+            public_ws_origin="ws://testserver",
+            firmware_dir=str(tmp_path),
+            firmware_version="2.4.3",
+            firmware_url="http://testserver/firmware/mickey.bin",
+        )
+    )
+    with TestClient(application) as ac:
+        got = ac.get("/firmware/mickey.bin")
+        assert got.status_code == 200
+        assert got.content == blob
+        assert got.headers.get("content-length") == str(len(blob))
+        assert "octet-stream" in (got.headers.get("content-type") or "")
+        traversal = ac.get("/firmware/..%2Fsecrets.bin")
+        assert traversal.status_code == 404
+        headers = device_headers(client_id="fw-pub")
+        ota = ac.post("/xiaozhi/ota/", headers=headers, json={"version": 2})
+        body = ota.json()
+        assert body["firmware"]["version"] == "2.4.3"
+        assert body["firmware"]["url"].endswith("/firmware/mickey.bin")
+        assert body["firmware"]["force"] == 0
+
+
+def test_ota_stays_dummy_when_bin_missing(tmp_path) -> None:
+    application = create_app(
+        Settings(
+            environment="test",
+            database_url="memory://",
+            allow_auto_provision=True,
+            auth_pepper="pepper",
+            gemini_api_keys="k",
+            public_http_origin="http://testserver",
+            public_ws_origin="ws://testserver",
+            firmware_dir=str(tmp_path),
+            firmware_version="2.4.3",
+            firmware_url="http://testserver/firmware/mickey.bin",
+        )
+    )
+    with TestClient(application) as ac:
+        headers = device_headers(client_id="fw-missing")
+        ota = ac.post("/xiaozhi/ota/", headers=headers, json={"version": 2})
+        body = ota.json()
+        assert body["firmware"]["version"] == "0.0.0"
+        assert body["firmware"]["url"].endswith("/firmware/none.bin")
+        assert ac.get("/firmware/mickey.bin").status_code == 404
+
