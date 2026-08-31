@@ -99,6 +99,11 @@ def _handshake_and_listen(ws, frames: int = 3, send_stop: bool = True) -> str:
             }
         )
     )
+    _listen(ws, session_id, frames=frames, send_stop=send_stop)
+    return session_id
+
+
+def _listen(ws, session_id: str, frames: int = 3, send_stop: bool = True) -> None:
     ws.send_text(
         json.dumps(
             {
@@ -113,7 +118,6 @@ def _handshake_and_listen(ws, frames: int = 3, send_stop: bool = True) -> str:
         ws.send_bytes(b"\x00\x01")
     if send_stop:
         ws.send_text(json.dumps({"session_id": session_id, "type": "listen", "state": "stop"}))
-    return session_id
 
 
 def _collect_until_tts_stop(ws, limit: int = 20) -> list[dict]:
@@ -334,12 +338,20 @@ def test_farewell_exits_after_tts_stop() -> None:
             application.state.brain_factory = lambda: brain
             application.state.tts = tts
             with _open_session(client) as ws:
-                _handshake_and_listen(ws)
+                session_id = _handshake_and_listen(ws)
                 seen = _collect_until_tts_stop(ws)
                 assert any(p.get("type") == "tts" and p.get("state") == "stop" for p in seen)
                 assert tts.spoken == ["ဘိုင်း။"]
-                message = ws.receive()
-                assert message["type"] in ("websocket.disconnect", "websocket.close")
+
+                brain.input_text = "မင်္ဂလာပါ"
+                brain.output_text = "မင်္ဂလာပါ။"
+                brain.calls = []
+                _listen(ws, session_id)
+                second = _collect_until_tts_stop(ws)
+                assert any(p.get("type") == "tts" and p.get("state") == "stop" for p in second)
+                stt_msg = next(p for p in second if p.get("type") == "stt")
+                assert stt_msg["text"] == "မင်္ဂလာပါ"
+                assert tts.spoken == ["ဘိုင်း။", "မင်္ဂလာပါ။"]
 
 
 def test_music_play_streams_opus_after_announcement() -> None:

@@ -258,7 +258,6 @@ class DeviceSession:
         self._closed = False
         self._close_code = 1000
         self._close_reason = ""
-        self._close_after_chat = False
         self._emotion = "happy"
         self._listen_mode = "auto"
         self._pcm_started = False
@@ -345,17 +344,12 @@ class DeviceSession:
         loop.create_task(hub.broadcast(self.device_id, snapshot), name="companion-presence")
 
     async def _request_exit(self) -> None:
-        self._close_after_chat = True
+        """Conversation ended (bye); keep /xiaozhi/v1/ open in READY for the next wake."""
         log.info("session.exit_requested", session_id=self.session_id)
 
     def _is_farewell(self, text: str) -> bool:
         normalized = _normalize_farewell(text)
         return normalized in _FAREWELL_PHRASES
-
-    async def _maybe_close_after_chat(self) -> None:
-        if self._close_after_chat and not self._closed:
-            log.info("session.close_after_chat", session_id=self.session_id)
-            await self.close()
 
     def _new_gate(self):
         return create_speech_gate(
@@ -903,7 +897,6 @@ class DeviceSession:
                 await self.brain.finish_speakable()
             await self._release_listening_interrupt(generation)
             TURNS.labels(result="ok").inc()
-            await self._maybe_close_after_chat()
             return
 
         if not self.brain:
@@ -942,6 +935,11 @@ class DeviceSession:
                 await self._queue_json(stt(self.session_id, user_text), generation)
                 await self._credit_interaction("voice")
                 if self._is_farewell(user_text):
+                    log.info(
+                        "session.farewell",
+                        session_id=self.session_id,
+                        user_text=user_text,
+                    )
                     await self._request_exit()
 
             self._inject_music_play(result, user_text)
@@ -984,7 +982,6 @@ class DeviceSession:
                 await self.brain.finish_speakable()
                 await speak_task
                 TURNS.labels(result="ok").inc()
-                await self._maybe_close_after_chat()
                 return
 
             await self.brain.finish_speakable()
@@ -1043,7 +1040,6 @@ class DeviceSession:
             if generation == self.state.generation and self.state.state != SessionState.CLOSED:
                 self._set_state(SessionState.READY, force=True)
             await self._maybe_reconnect_owner_memory()
-            await self._maybe_close_after_chat()
 
     async def _handle_tools(
         self,
