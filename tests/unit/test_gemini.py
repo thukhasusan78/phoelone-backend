@@ -40,6 +40,10 @@ def test_live_brain_builds_config() -> None:
     assert config.output_audio_transcription is not None
     assert config.context_window_compression is not None
     assert config.session_resumption is None
+    brain._resumption_handle = "resume-me"
+    resumed = brain._build_live_config()
+    assert resumed.session_resumption is not None
+    assert resumed.session_resumption.handle == "resume-me"
 
 
 def test_default_model_is_gemini_31_live() -> None:
@@ -283,3 +287,25 @@ async def test_receive_loop_keeps_socket_after_turn_complete() -> None:
             await brain._receive_task
         except (asyncio.CancelledError, Exception):
             pass
+
+
+async def test_reset_conversation_drops_resumption_handle() -> None:
+    from unittest.mock import AsyncMock
+
+    settings = Settings(
+        environment="test",
+        database_url="memory://",
+        gemini_api_keys="k",
+        gemini_model="gemini-3.1-flash-live-preview",
+    )
+    brain = GeminiLiveBrain(settings, KeyPool(settings.gemini_keys))
+    brain._resumption_handle = "old-handle"
+    brain._awaiting_tool_followup = True
+    brain.close = AsyncMock()
+    brain.ensure_connected = AsyncMock()
+    await brain.reset_conversation()
+    assert brain._resumption_handle is None
+    assert brain._awaiting_tool_followup is False
+    assert brain._cancelled is False
+    brain.close.assert_awaited_once()
+    brain.ensure_connected.assert_awaited_once()

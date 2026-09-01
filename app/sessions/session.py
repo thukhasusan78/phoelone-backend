@@ -267,6 +267,9 @@ class DeviceSession:
         self._close_code = 1000
         self._close_reason = ""
         self._awaiting_wake = False
+        self._swallow_auto_listen = False
+        self._ignored_auto_listen = False
+        self._live_stale = False
         self._emotion = "happy"
         self._listen_mode = "auto"
         self._pcm_started = False
@@ -355,6 +358,7 @@ class DeviceSession:
     async def _request_exit(self) -> None:
         """End the voice conversation; stay on /xiaozhi/v1/ in READY until the next wakeword."""
         self._awaiting_wake = True
+        self._live_stale = True
         log.info("session.exit_requested", session_id=self.session_id)
 
     async def _notify_device_idle(self) -> None:
@@ -370,6 +374,34 @@ class DeviceSession:
         await self._set_emotion("staticstate")
         await self._queue_json(llm_emotion(self.session_id, self._emotion), _KEEPALIVE_GENERATION)
         self._schedule_presence_broadcast()
+        # If auto listen/start already arrived during farewell TTS, do not also
+        # swallow the next wake. Otherwise swallow one late auto-continue.
+        self._swallow_auto_listen = not self._ignored_auto_listen
+        self._ignored_auto_listen = False
+        self._awaiting_wake = False
+        await self._reset_live_if_stale()
+
+    async def _reset_live_if_stale(self) -> None:
+        """Open a fresh Gemini Live session after farewell so context cannot loop."""
+        if not self._live_stale:
+            return
+        if self.brain is None or self._closed:
+            self._live_stale = False
+            return
+        reset = getattr(self.brain, "reset_conversation", None)
+        try:
+            if callable(reset):
+                await reset()
+            else:
+                await self._reconnect_owner_live()
+            self._live_stale = False
+            log.info("session.live_reset", session_id=self.session_id)
+        except Exception as exc:  # noqa: BLE001
+            log.info(
+                "session.live_reset_failed",
+                error=str(exc),
+                session_id=self.session_id,
+            )
 
     def _is_farewell(self, text: str) -> bool:
         normalized = _normalize_farewell(text)
@@ -643,26 +675,40 @@ class DeviceSession:
         if msg.state == "start":
             mode = msg.mode or "auto"
             self._listen_mode = mode
-            # After farewell, Xiaozhi auto-continues with listen/start. Ignore that so
-            # the pipe stays READY for dashboard commands until the next wakeword.
-            if self._awaiting_wake and mode != "manual":
-                log.info(
-                    "session.listen_ignored_until_wake",
-                    session_id=self.session_id,
-                    mode=mode,
-                )
-                return
-            self._awaiting_wake = False
+            # After farewell, Xiaozhi auto-continues with listen/start. Ignore that
+            # so abort can take the device Idle. The next start is a new wake.
+            if mode != "manual":
+                if self._awaiting_wake:
+                    self._ignored_auto_listen = True
+                    log.info(
+                        "session.listen_ignored_until_wake",
+                        session_id=self.session_id,
+                        mode=mode,
+                        reason="awaiting_wake",
+                    )
+                    return
+                if self._swallow_auto_listen:
+                    self._swallow_auto_listen = False
+                    log.info(
+                        "session.listen_ignored_until_wake",
+                        session_id=self.session_id,
+                        mode=mode,
+                        reason="post_abort",
+                    )
+                    return
             await self._start_listen()
         elif msg.state == "stop":
             await self._stop_listen()
         elif msg.state == "detect":
-            self._awaiting_wake = False
             await self._abort(reason="wake_word_detected")
             await self._start_listen()
 
     async def _start_listen(self) -> None:
+        self._awaiting_wake = False
+        self._swallow_auto_listen = False
+        self._ignored_auto_listen = False
         await self._cancel_turn()
+        await self._reset_live_if_stale()
         gen = self.state.bump_generation()
         try:
             self._set_state(SessionState.LISTENING)

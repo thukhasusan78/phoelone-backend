@@ -92,6 +92,8 @@ class Brain(Protocol):
 
     async def close(self) -> None: ...
 
+    async def reset_conversation(self) -> None: ...
+
 
 class KeyPool:
     def __init__(self, keys: list[str]) -> None:
@@ -145,6 +147,7 @@ class GeminiLiveBrain:
 
     async def ensure_connected(self) -> None:
         """Open the Live socket early so the first listen/start is not a cold connect."""
+        self._cancelled = False
         try:
             await self._ensure_session()
             self._start_receive_loop()
@@ -534,6 +537,15 @@ class GeminiLiveBrain:
             except Exception:  # noqa: BLE001
                 pass
         await self._close_live_socket()
+
+    async def reset_conversation(self) -> None:
+        """Drop Live context so the next wake is a new chat, not a resumed farewell."""
+        self._resumption_handle = None
+        self._awaiting_tool_followup = False
+        log.info("gemini.reset_conversation")
+        await self.close()
+        self._cancelled = False
+        await self.ensure_connected()
 
     def _start_receive_loop(self) -> None:
         if self._receive_task is None or self._receive_task.done():

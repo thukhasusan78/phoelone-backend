@@ -348,6 +348,60 @@ async def test_farewell_wakeword_starts_listen() -> None:
 
 
 @pytest.mark.asyncio
+async def test_farewell_idle_does_not_swallow_wake_after_ignored_auto_listen() -> None:
+    session = _session()
+    brain = FakeBrain()
+    session.brain = brain
+    session._awaiting_wake = True
+    session._live_stale = True
+    session.state.state = SessionState.READY
+    await session._on_listen(
+        ListenMessage(type="listen", session_id="s", state="start", mode="auto")
+    )
+    assert session.state.state == SessionState.READY
+    assert session._ignored_auto_listen is True
+
+    await session._notify_device_idle()
+    assert session._awaiting_wake is False
+    assert session._swallow_auto_listen is False
+    assert session._live_stale is False
+    assert brain.conversation_resets == 1
+    assert brain.cancelled is False
+
+    await session._on_listen(
+        ListenMessage(type="listen", session_id="s", state="start", mode="auto")
+    )
+    assert session.state.state == SessionState.LISTENING
+    assert session._awaiting_wake is False
+
+
+@pytest.mark.asyncio
+async def test_farewell_idle_swallows_one_late_auto_listen_then_accepts_wake() -> None:
+    session = _session()
+    brain = FakeBrain()
+    session.brain = brain
+    session._awaiting_wake = True
+    session._live_stale = True
+    session.state.state = SessionState.READY
+
+    await session._notify_device_idle()
+    assert session._awaiting_wake is False
+    assert session._swallow_auto_listen is True
+    assert brain.conversation_resets == 1
+
+    await session._on_listen(
+        ListenMessage(type="listen", session_id="s", state="start", mode="auto")
+    )
+    assert session.state.state == SessionState.READY
+    assert session._swallow_auto_listen is False
+
+    await session._on_listen(
+        ListenMessage(type="listen", session_id="s", state="start", mode="auto")
+    )
+    assert session.state.state == SessionState.LISTENING
+
+
+@pytest.mark.asyncio
 async def test_sleep_aborts_listening() -> None:
     session = _session()
     session.state.state = SessionState.LISTENING

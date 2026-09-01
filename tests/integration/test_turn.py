@@ -368,8 +368,11 @@ def test_farewell_exits_after_tts_stop() -> None:
                 session = application.state.sessions.get("aa:bb:cc:dd:ee:ff")
                 assert session is not None
                 assert session.state.state == SessionState.READY
-                assert session._awaiting_wake is True
+                assert session._awaiting_wake is False
+                assert session._live_stale is False
                 assert session._companion_lock.locked() is False
+                assert brain.conversation_resets == 1
+                assert brain.cancelled is False
 
                 ws.send_text(
                     json.dumps(
@@ -407,6 +410,34 @@ def test_farewell_exits_after_tts_stop() -> None:
                 stt_msg = next(p for p in second if p.get("type") == "stt")
                 assert stt_msg["text"] == "မင်္ဂလာပါ"
                 assert tts.spoken == ["ဘိုင်း", "မင်္ဂလာပါ။"]
+                assert brain.conversation_resets == 1
+                assert session._awaiting_wake is False
+
+                brain.input_text = "how are you"
+                brain.output_text = "ကောင်းပါတယ်။"
+                ws.send_text(
+                    json.dumps(
+                        {
+                            "session_id": session_id,
+                            "type": "listen",
+                            "state": "start",
+                            "mode": "auto",
+                        }
+                    )
+                )
+                for _ in range(3):
+                    ws.send_bytes(b"\x00\x01")
+                ws.send_text(
+                    json.dumps({"session_id": session_id, "type": "listen", "state": "stop"})
+                )
+                third = _collect_until_tts_stop(ws)
+                assert any(p.get("type") == "tts" and p.get("state") == "stop" for p in third)
+                assert not any(p.get("type") == "abort" for p in third)
+                stt_third = next(p for p in third if p.get("type") == "stt")
+                assert stt_third["text"] == "how are you"
+                assert tts.spoken == ["ဘိုင်း", "မင်္ဂလာပါ။", "ကောင်းပါတယ်။"]
+                assert session._awaiting_wake is False
+                assert session.state.state == SessionState.READY
 
 
 def test_music_play_streams_opus_after_announcement() -> None:

@@ -39,6 +39,7 @@ class FakeBrain:
         self.pet_events: list[str] = []
         self.text_turns: list[str] = []
         self.owner_prefix = ""
+        self.conversation_resets = 0
 
     async def configure_tools(self, declarations: list[dict]) -> None:
         self.configured = declarations
@@ -181,6 +182,11 @@ class FakeBrain:
 
     async def close(self) -> None:
         self.cancelled = True
+
+    async def reset_conversation(self) -> None:
+        self.conversation_resets += 1
+        await self.close()
+        await self.ensure_connected()
 
 
 def _tone_pcm(samples: int = 960, amplitude: int = 4000, freq_bins: int = 17) -> bytes:
