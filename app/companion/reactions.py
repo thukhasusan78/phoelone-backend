@@ -136,3 +136,49 @@ def rps_plan(winner: str, *, match_over: bool = False) -> RpsPlan:
 
 def rps_think_motion() -> dict[str, Any]:
     return {"action": "swing", "steps": 1, "speed": 1400, "amount": 20}
+
+
+_TTT_LINES = {
+    "player": (
+        "အင်း ရှုံးသွားတယ်။",
+        "ရှင် နိုင်သွားတာပဲ။",
+    ),
+    "mickey": (
+        "ကျွန်တော် နိုင်ပြီ။",
+        "ဟီး ဒီပွဲ ကျွန်တော်ပဲ။",
+    ),
+    "draw": (
+        "သရေပဲ။",
+        "တူနေတယ်နော်။",
+    ),
+}
+
+_TTT_LINE_INDEX = {"player": 0, "mickey": 0, "draw": 0}
+
+
+def ttt_plan(winner: str) -> RpsPlan:
+    if winner not in _TTT_LINES:
+        winner = "draw"
+    idx = _TTT_LINE_INDEX[winner] % len(_TTT_LINES[winner])
+    _TTT_LINE_INDEX[winner] = idx + 1
+    line = _TTT_LINES[winner][idx]
+    if winner == "player":
+        return RpsPlan(
+            think_emotion="thinking",
+            motion=dance_payload("sit"),
+            line=line,
+            end_emotion="sad",
+        )
+    if winner == "mickey":
+        return RpsPlan(
+            think_emotion="thinking",
+            motion=dance_payload("jump"),
+            line=line,
+            end_emotion="happy",
+        )
+    return RpsPlan(
+        think_emotion="thinking",
+        motion=dance_payload("home"),
+        line=line,
+        end_emotion="confused",
+    )

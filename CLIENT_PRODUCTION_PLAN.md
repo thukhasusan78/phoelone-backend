@@ -1,7 +1,7 @@
 # Phoe Lone Client Production Plan (ESP32 firmware)
 
-**Status:** planning document only. Do not change application C++ until this file is used as an implementation brief.  
-**Date:** 2026-08-23  
+**Status:** background reference. The **active implementation brief** is [FIRMWARE_NOW.md](FIRMWARE_NOW.md) (2026-09-02): safety → ping/pong → sensors → idle director → always-on companion WS. Live board identity is **`mickey`**, not `otto-robot`.  
+**Date:** 2026-08-23 (this file); sprint brief supersedes the “do not implement until…” line below.  
 **Repo:** [thukhasusan78/phoelone](https://github.com/thukhasusan78/phoelone) — board profile `otto-robot` (no-camera), chip ESP32-S3 N16R8, ESP-IDF v6.0.2.  
 **Companion:** server work lives in `BACKEND_PRODUCTION_PLAN.md` on the VPS. This file never assigns Python tasks.  
 **Build:** `python scripts/build.py otto-robot --name otto-robot --language en-US`  

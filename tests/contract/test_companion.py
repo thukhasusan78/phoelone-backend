@@ -56,6 +56,8 @@ def test_activate_sets_cookie_and_opens_dashboard(app) -> None:
         assert "Rock" in dashboard.text
         assert "rps-arena" in dashboard.text
         assert "rps-chant" in dashboard.text
+        assert "ttt-board" in dashboard.text
+        assert "btn-ttt-new" in dashboard.text
         assert "btn-play" in dashboard.text
         assert "alarm-time" in dashboard.text
         assert "set-volume" in dashboard.text
@@ -66,6 +68,17 @@ def test_activate_sets_cookie_and_opens_dashboard(app) -> None:
         assert "Mickey knows me" in dashboard.text
         assert "meter-happy" in dashboard.text
         assert "trim-left_leg" in dashboard.text
+        assert "Thu Kha Su San" in dashboard.text
+        assert 'id="about"' in dashboard.text
+        assert "Jarvis AI Agent" in dashboard.text
+        assert "https://github.com/thukhasusan78" in dashboard.text
+        assert "View Creator Portfolio" in dashboard.text
+        assert 'id="portfolio-panel"' in dashboard.text
+        assert "Bluetooth Jammers" in dashboard.text
+        assert "Power Station Internal" not in dashboard.text
+        text = dashboard.text
+        assert text.index("Mickey knows me") < text.index("View Creator Portfolio")
+        assert text.index("View Creator Portfolio") < text.index("Thu Kha Su San")
 
 
 def test_companion_ws_requires_cookie(app) -> None:
@@ -74,6 +87,30 @@ def test_companion_ws_requires_cookie(app) -> None:
             with client.websocket_connect("/companion/v1/"):
                 pass
         assert exc.value.code == 1008
+
+
+def test_tiktok_stats_requires_cookie(app) -> None:
+    with TestClient(app) as client:
+        response = client.get("/api/tiktok_stats")
+        assert response.status_code == 401
+
+
+def test_tiktok_stats_returns_payload(app, monkeypatch) -> None:
+    async def _fake(http=None, *, now=None):
+        from app.companion.tiktok import TikTokStats
+
+        return TikTokStats(9721, 75300)
+
+    monkeypatch.setattr("app.api.companion.fetch_tiktok_stats", _fake)
+    with TestClient(app) as client:
+        ota_and_bind(client)
+        response = client.get("/api/tiktok_stats")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["ok"] is True
+        assert body["followers"] == 9721
+        assert body["formatted"]["followers"] == "9.72K"
+        assert body["formatted"]["likes"] == "75.3K"
 
 
 def test_companion_offline_dance(app) -> None:
@@ -263,6 +300,45 @@ def test_companion_rps_state(app) -> None:
                 assert spoken
                 assert "Rock" in spoken[0] and "Scissors" in spoken[0]
                 assert any(line != spoken[0] for line in spoken[1:])
+
+
+def test_companion_ttt_state(app) -> None:
+    application = app
+    brain = FakeBrain()
+    with TestClient(application) as client:
+        application.state.brain_factory = lambda: brain
+        token = ota_and_bind(client, client_id="cid")[1]
+        with _connect(client, token) as device:
+            _complete_hello(device)
+            session = application.state.sessions.get("aa:bb:cc:dd:ee:ff")
+            assert session is not None
+
+            async def _capture_speak(text, _generation, emotion="happy"):
+                return None
+
+            async def _skip_mcp(name, arguments=None):
+                return "ok"
+
+            session._speak = _capture_speak
+            session.mcp.call = _skip_mcp
+            with client.websocket_connect("/companion/v1/") as portal:
+                portal.receive_json()
+                portal.receive_json()
+                portal.send_json({"type": "game.start", "game": "ttt"})
+                start = _recv_until(portal, "game.state")
+                assert start["game"] == "ttt"
+                assert start["phase"] == "your_turn"
+                assert start["board"] == [None] * 9
+                portal.send_json({"type": "game.move", "game": "ttt", "cell": 4})
+                placed = _recv_until(portal, "game.state")
+                assert placed["board"][4] == "x"
+                for _ in range(8):
+                    if "o" in (placed.get("board") or []):
+                        break
+                    placed = _recv_until(portal, "game.state")
+                assert placed["game"] == "ttt"
+                assert "o" in placed["board"]
+                assert placed["board"][4] == "x"
 
 
 def test_companion_chat_offline(app) -> None:

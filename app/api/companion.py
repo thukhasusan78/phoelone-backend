@@ -10,6 +10,7 @@ from app.api.portal import pin_unlock_page
 from app.api.rate_limit import client_key, limiter
 from app.companion.auth import (
     clear_companion_cookie,
+    identity_from_request,
     identity_from_websocket,
     parse_pin_payload,
     pins_match,
@@ -17,6 +18,7 @@ from app.companion.auth import (
 )
 from app.companion.errors import CompanionError
 from app.companion.hub import error_frame
+from app.companion.tiktok import TikTokStatsError, fetch_tiktok_stats
 from app.observability.logging import get_logger
 
 log = get_logger(__name__)
@@ -26,6 +28,22 @@ router = APIRouter()
 def _wants_json(request: Request) -> bool:
     content_type = (request.headers.get("content-type") or "").lower()
     return "application/json" in content_type
+
+
+@router.get("/api/tiktok_stats")
+@router.get("/companion/tiktok-stats")
+async def tiktok_stats(request: Request):
+    settings = request.app.state.settings
+    identity = identity_from_request(request, settings)
+    if identity is None:
+        raise HTTPException(status_code=401, detail="unauthorized")
+    limiter.check(client_key(request), settings.companion_rate_limit_per_minute)
+    try:
+        stats = await fetch_tiktok_stats()
+    except TikTokStatsError as exc:
+        log.info("tiktok.stats_unavailable", error=str(exc))
+        raise HTTPException(status_code=502, detail="tiktok stats unavailable") from exc
+    return stats.to_json()
 
 
 @router.post("/companion/logout")

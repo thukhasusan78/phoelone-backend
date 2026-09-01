@@ -13,6 +13,7 @@ from app.companion.reactions import (
     rps_plan,
     rps_recover_motion,
     rps_timeout_line,
+    ttt_plan,
 )
 
 
@@ -145,6 +146,18 @@ def test_rps_countdown_line() -> None:
     assert "Paper" in line
     assert "Scissors" in line
     assert rps_timeout_line()
+
+
+def test_ttt_plan_motions_match_rps() -> None:
+    win = ttt_plan("mickey")
+    assert win.end_emotion == "happy"
+    assert win.motion["action"] == "jump"
+    lose = ttt_plan("player")
+    assert lose.end_emotion == "sad"
+    assert lose.motion["action"] == "sit"
+    draw = ttt_plan("draw")
+    assert draw.end_emotion == "confused"
+    assert draw.motion["action"] == "home"
 
 
 @pytest.mark.asyncio

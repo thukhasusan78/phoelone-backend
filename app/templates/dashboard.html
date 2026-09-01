@@ -257,6 +257,28 @@
       70% { transform: scale(1.18); opacity: 1; }
       100% { transform: scale(1); }
     }
+    .ttt-board {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      max-width: 280px;
+      margin: 0 0 14px;
+    }
+    .ttt-cell {
+      aspect-ratio: 1;
+      border-radius: 18px;
+      font-size: 1.8rem;
+      font-weight: 800;
+      padding: 0;
+      background: linear-gradient(180deg, #3b0764, #1e1b4b);
+      border: 1px solid #c084fc66;
+      box-shadow: 0 8px 20px #7c3aed33;
+    }
+    .ttt-cell.last {
+      border-color: #34d39988;
+      box-shadow: 0 0 0 3px #34d39933, 0 10px 28px #34d39944;
+    }
+    .ttt-cell:disabled { opacity: 0.55; }
     @keyframes tab-pop {
       0% { transform: scale(0.85); }
       60% { transform: scale(1.18); }
@@ -300,6 +322,162 @@
     input[type="time"] { font-size: 1.05rem; font-weight: 700; }
     input[type="range"] { width: 100%; accent-color: var(--accent); }
     .meter em { font-style: normal; color: var(--ink); }
+    .about-name { font-size: 1.35rem; letter-spacing: -0.03em; margin: 0 0 4px; }
+    .about-role { color: var(--accent); font-weight: 700; margin: 0 0 4px; }
+    .about-lede { color: var(--muted); line-height: 1.5; margin: 0 0 14px; }
+    .about-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 8px;
+    }
+    .about-card {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 14px 12px;
+      background: linear-gradient(180deg, #2a184866, #12081f88);
+      transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+    }
+    .about-card:hover {
+      border-color: #f9a8d488;
+      box-shadow: 0 0 0 3px #f472b622, 0 10px 24px #7c3aed33;
+      transform: translateY(-2px);
+    }
+    .about-card h3 { margin: 0 0 6px; font-size: 0.95rem; }
+    .about-card p { margin: 0; color: var(--muted); font-size: 0.85rem; line-height: 1.4; }
+    .skill-chip {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 10px 12px;
+      background: #2a184866;
+      transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+    }
+    .skill-chip:hover {
+      border-color: var(--accent-2);
+      box-shadow: 0 8px 18px #22d3ee22;
+      transform: translateY(-1px);
+    }
+    .skill-chip strong { font-size: 0.9rem; }
+    .skill-chip span { font-size: 0.72rem; color: var(--muted); font-weight: 600; }
+    .about-stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+      gap: 8px;
+      margin: 12px 0 0;
+    }
+    .about-stat {
+      text-align: center;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 10px 8px;
+      background: #160a28;
+    }
+    .about-stat strong { display: block; color: var(--accent); font-size: 1.05rem; }
+    .about-stat span { font-size: 0.72rem; color: var(--muted); font-weight: 700; }
+    .about-features { display: grid; gap: 6px; margin: 12px 0 0; }
+    .about-features details {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: #160a28;
+    }
+    .about-features summary {
+      cursor: pointer;
+      padding: 10px 12px;
+      font-weight: 700;
+      font-size: 0.9rem;
+      list-style: none;
+    }
+    .about-features summary::-webkit-details-marker { display: none; }
+    .about-features details[open] {
+      border-color: #f9a8d466;
+      background: #83184322;
+    }
+    .about-features details p {
+      margin: 0;
+      padding: 0 12px 12px;
+      color: var(--muted);
+      font-size: 0.85rem;
+      line-height: 1.4;
+    }
+    .timeline { display: grid; gap: 10px; margin: 0 0 14px; }
+    .timeline-item { display: grid; gap: 2px; }
+    .timeline-item .about-lede { margin: 0; }
+    .about-card > .pill { display: inline-block; margin-bottom: 8px; }
+    h2.about-sub { margin-top: 18px; }
+    #about-projects > .about-card { margin-bottom: 12px; }
+    .timeline-item .when {
+      font-size: 0.72rem;
+      font-weight: 800;
+      color: var(--gold);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    .flag {
+      font-size: 0.75rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin: 0 0 8px;
+    }
+    .about-links { display: flex; flex-wrap: wrap; gap: 8px; }
+    a.ghost {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      text-decoration: none;
+      border-radius: 16px;
+      padding: 12px 14px;
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--ink);
+      background: linear-gradient(180deg, #2a1848, #1a0f30);
+      border: 1px solid #a78bfa44;
+      box-shadow: 0 8px 20px #7c3aed22;
+    }
+    a.ghost:hover { border-color: #f9a8d488; filter: brightness(1.08); }
+    .about-photos {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 8px;
+      margin: 0 0 10px;
+    }
+    .about-photo {
+      display: none;
+      margin: 0;
+      border-radius: 16px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      background: #160a28;
+      aspect-ratio: 16 / 10;
+    }
+    .about-photo.has-img { display: block; }
+    .about-photo img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .tiktok-stats {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin: 0 0 12px;
+    }
+    .tiktok-stats .about-stat { min-width: 88px; }
+    @keyframes tiktok-pulse {
+      50% { opacity: 0.35; }
+    }
+    .tiktok-stats.is-loading [data-followers],
+    .tiktok-stats.is-loading [data-likes] {
+      animation: tiktok-pulse 0.9s ease-in-out infinite;
+    }
+    .portfolio-toggle-row { display: flex; }
+    .portfolio-panel { display: none; gap: 16px; }
+    .portfolio-panel.is-open { display: grid; }
     .tab-pages {
       flex: 1;
       min-height: 0;
@@ -404,8 +582,13 @@
         grid-template-columns: 1fr 1fr;
         align-items: stretch;
       }
-      #tab-settings .foot { grid-column: 1 / -1; }
-      #tab-settings.is-active > section,
+      #tab-settings .foot,
+      #tab-settings .span-all { grid-column: 1 / -1; }
+      .portfolio-panel.is-open {
+        grid-template-columns: 1fr 1fr;
+        align-items: start;
+      }
+      .portfolio-panel .span-all { grid-column: 1 / -1; }
       #tab-home.is-active > section,
       #tab-play.is-active > section {
         min-height: 100%;
@@ -499,6 +682,25 @@
             <button class="ghost" type="button" id="btn-new"><span class="ico" aria-hidden="true">✨</span>New match</button>
           </div>
         </section>
+
+        <section>
+          <h2><span class="sec-ico" aria-hidden="true">#️⃣</span>Tic-tac-toe</h2>
+          <p class="score" id="ttt-status">Tap New game. You are X — Mickey is O.</p>
+          <div class="ttt-board" id="ttt-board">
+            <button type="button" class="ttt-cell" data-cell="0" aria-label="square 1"></button>
+            <button type="button" class="ttt-cell" data-cell="1" aria-label="square 2"></button>
+            <button type="button" class="ttt-cell" data-cell="2" aria-label="square 3"></button>
+            <button type="button" class="ttt-cell" data-cell="3" aria-label="square 4"></button>
+            <button type="button" class="ttt-cell" data-cell="4" aria-label="square 5"></button>
+            <button type="button" class="ttt-cell" data-cell="5" aria-label="square 6"></button>
+            <button type="button" class="ttt-cell" data-cell="6" aria-label="square 7"></button>
+            <button type="button" class="ttt-cell" data-cell="7" aria-label="square 8"></button>
+            <button type="button" class="ttt-cell" data-cell="8" aria-label="square 9"></button>
+          </div>
+          <div class="row" style="margin-bottom: 10px">
+            <button type="button" id="btn-ttt-new"><span class="ico" aria-hidden="true">✨</span>New game</button>
+          </div>
+        </section>
       </div>
 
       <div id="tab-chat" class="tab-page">
@@ -551,6 +753,233 @@
             <button type="submit"><span class="ico" aria-hidden="true">👋</span>Log out</button>
           </form>
         </div>
+
+        <div class="span-all portfolio-toggle-row">
+          <button type="button" id="btn-portfolio" class="ghost" aria-expanded="false" aria-controls="portfolio-panel">
+            <span class="ico" aria-hidden="true">✨</span><span class="portfolio-btn-label">View Creator Portfolio</span>
+          </button>
+        </div>
+
+        <div id="portfolio-panel" class="span-all portfolio-panel">
+          <section id="about">
+            <h2><span class="sec-ico" aria-hidden="true">👤</span>About</h2>
+            <h3 class="about-name">Thu Kha Su San</h3>
+            <p class="about-role">AI Agent Developer &amp; Tech Innovator</p>
+            <p class="about-lede">Based in Myanmar 🇲🇲 · Building intelligent systems that combine AI with practical automation.</p>
+            <p class="about-lede">With expertise in Python, FastAPI, Google Gemini AI, and modern web technologies, I create solutions that are not just powerful, but also elegant and efficient. Specializing in AI agent development, Telegram automation, media processing, and web development.</p>
+            <div class="timeline">
+              <div class="timeline-item">
+                <span class="when">Now</span>
+                <strong>Mickey (Phoe Lone)</strong>
+                <span class="about-lede">ESP32 companion robot — Gemini Live, Edge TTS, and this dashboard.</span>
+              </div>
+              <div class="timeline-item">
+                <span class="when">Earlier</span>
+                <strong>Jarvis AI Agent</strong>
+                <span class="about-lede">Telegram-first agent with Gemini, FastAPI, and a hybrid memory stack.</span>
+              </div>
+              <div class="timeline-item">
+                <span class="when">Also</span>
+                <strong>THUKHA Industries</strong>
+                <span class="about-lede">Burmese tech content and custom gadgets on TikTok @thukhatech.</span>
+              </div>
+            </div>
+            <div class="about-grid">
+              <article class="about-card">
+                <h3>🧠 AI Agent Development</h3>
+                <p>Building AI agents with reasoning, memory systems, and autonomous decision-making.</p>
+              </article>
+              <article class="about-card">
+                <h3>⚡ Telegram Automation</h3>
+                <p>Bots and userbots for automation, content distribution, and intelligent interactions.</p>
+              </article>
+              <article class="about-card">
+                <h3>🎬 Media Processing</h3>
+                <p>Face recognition, video processing, and intelligent content classification.</p>
+              </article>
+              <article class="about-card">
+                <h3>🌐 Web Development</h3>
+                <p>Full-stack apps with modern frameworks — responsive and performant.</p>
+              </article>
+            </div>
+          </section>
+
+          <section id="about-skills">
+            <h2><span class="sec-ico" aria-hidden="true">🛠️</span>Skills</h2>
+            <div class="about-grid">
+              <div class="skill-chip"><strong>Python</strong><span>Language</span></div>
+              <div class="skill-chip"><strong>FastAPI</strong><span>Framework</span></div>
+              <div class="skill-chip"><strong>Google Gemini AI</strong><span>AI</span></div>
+              <div class="skill-chip"><strong>LLMs</strong><span>AI</span></div>
+              <div class="skill-chip"><strong>Telegram Bot Development</strong><span>Automation</span></div>
+              <div class="skill-chip"><strong>Playwright</strong><span>Automation</span></div>
+              <div class="skill-chip"><strong>LanceDB</strong><span>Database</span></div>
+              <div class="skill-chip"><strong>PostgreSQL</strong><span>Database</span></div>
+              <div class="skill-chip"><strong>Face Recognition</strong><span>Computer Vision</span></div>
+              <div class="skill-chip"><strong>Edge TTS</strong><span>Voice</span></div>
+              <div class="skill-chip"><strong>ESP32</strong><span>Hardware</span></div>
+              <div class="skill-chip"><strong>WebSockets</strong><span>Infrastructure</span></div>
+              <div class="skill-chip"><strong>Web Scraping</strong><span>Tools</span></div>
+              <div class="skill-chip"><strong>SSH</strong><span>Tools</span></div>
+              <div class="skill-chip"><strong>Cloudflare Tunnels</strong><span>Infrastructure</span></div>
+              <div class="skill-chip"><strong>APScheduler</strong><span>Tools</span></div>
+            </div>
+          </section>
+
+          <section id="about-projects" class="span-all">
+            <h2><span class="sec-ico" aria-hidden="true">🚀</span>Projects</h2>
+            <article class="about-card">
+              <p class="flag">Current</p>
+              <h3>Mickey — Phoe Lone</h3>
+              <p>ESP32 companion robot with a cookie-gated web dashboard. Gemini Live for conversation, Edge TTS with Myanmar voice, dance pad, games, care meters, and owner memory — all over a single WebSocket path.</p>
+            </article>
+            <article class="about-card">
+              <p class="flag">Flagship</p>
+              <h3>Jarvis AI Agent</h3>
+              <p>A sophisticated AI agent system built with Python, combining cutting-edge AI capabilities with practical automation tools.</p>
+              <div class="about-features">
+                <details>
+                  <summary>Google Gemini AI Brain</summary>
+                  <p>Advanced AI reasoning engine powering intelligent decision-making and natural conversations.</p>
+                </details>
+                <details>
+                  <summary>FastAPI + Uvicorn Server</summary>
+                  <p>High-performance async server architecture for handling concurrent requests efficiently.</p>
+                </details>
+                <details>
+                  <summary>Telegram Bot + Userbot</summary>
+                  <p>Dual interface for both bot commands and userbot automation capabilities.</p>
+                </details>
+                <details>
+                  <summary>Playwright Browser Automation</summary>
+                  <p>Automated web browsing and interaction for data collection and task automation.</p>
+                </details>
+                <details>
+                  <summary>LanceDB Vector Database</summary>
+                  <p>Efficient vector storage for semantic search and similarity matching.</p>
+                </details>
+                <details>
+                  <summary>Edge TTS with Myanmar Voice</summary>
+                  <p>Text-to-speech synthesis with native Myanmar language support for voice interactions.</p>
+                </details>
+                <details>
+                  <summary>Face Recognition</summary>
+                  <p>Advanced computer vision for facial detection and recognition tasks.</p>
+                </details>
+                <details>
+                  <summary>Movie Engine</summary>
+                  <p>Intelligent system for auto-detecting, classifying, deduplicating, and reposting movies to Telegram channels.</p>
+                </details>
+                <details>
+                  <summary>Web Search Tool</summary>
+                  <p>Real-time internet search integration for current information retrieval.</p>
+                </details>
+                <details>
+                  <summary>File Management</summary>
+                  <p>Comprehensive file handling and organization capabilities.</p>
+                </details>
+                <details>
+                  <summary>System Commands</summary>
+                  <p>Execute system-level operations and scripts.</p>
+                </details>
+                <details>
+                  <summary>Hybrid Memory System</summary>
+                  <p>Dual-layer memory: Short-term SQLite for immediate context and Long-term Vector DB for historical knowledge.</p>
+                </details>
+              </div>
+              <div class="about-stats">
+                <div class="about-stat"><strong>12+</strong><span>Components</span></div>
+                <div class="about-stat"><strong>Gemini</strong><span>AI Models</span></div>
+                <div class="about-stat"><strong>Telegram</strong><span>Platforms</span></div>
+                <div class="about-stat"><strong>Python</strong><span>Languages</span></div>
+              </div>
+            </article>
+            <h2 class="about-sub"><span class="sec-ico" aria-hidden="true">🔧</span>Hardware</h2>
+            <div class="about-grid">
+              <article class="about-card">
+                <span class="pill">Hardware</span>
+                <div class="about-photos">
+                  <figure class="about-photo">
+                    <img src="/static/portfolio/jammers.jpg" alt="Bluetooth jammer collection">
+                  </figure>
+                  <figure class="about-photo">
+                    <img src="/static/portfolio/jammer-oled.jpg" alt="Bluetooth jammer v3 with OLED">
+                  </figure>
+                </div>
+                <h3>Bluetooth Jammers</h3>
+                <p>ESP32 jammer boards with multiple antennas, including a handheld v3 with OLED signal visualization.</p>
+              </article>
+              <article class="about-card">
+                <span class="pill">Hardware</span>
+                <div class="about-photos">
+                  <figure class="about-photo">
+                    <img src="/static/portfolio/power-station.jpg" alt="DC power station front">
+                  </figure>
+                  <figure class="about-photo">
+                    <img src="/static/portfolio/power-station-internal.jpg" alt="DC power station internals">
+                  </figure>
+                </div>
+                <h3>DC Power Station</h3>
+                <p>12.8V station with three switched 12V outputs, USB 5V, and a voltmeter. Internals: lithium pack, BMS, and XT60.</p>
+              </article>
+              <article class="about-card">
+                <span class="pill">Hardware</span>
+                <div class="about-photos">
+                  <figure class="about-photo">
+                    <img src="/static/portfolio/esp32-boards.jpg" alt="ESP32 remote control and WiFi boards">
+                  </figure>
+                </div>
+                <h3>ESP32 Remote Control &amp; WiFi Boards</h3>
+                <p>Two ESP32 boards with OLED “Remote Control” and “WiFi” interfaces, two antennas each.</p>
+              </article>
+            </div>
+            <h2 class="about-sub"><span class="sec-ico" aria-hidden="true">📱</span>TikTok — THUKHA Industries</h2>
+            <p class="about-lede">@thukhatech — tech content in Burmese for the Myanmar community.</p>
+            <div id="tiktok-stats" class="tiktok-stats is-loading">
+              <div class="about-stat"><strong data-followers>…</strong><span>Followers</span></div>
+              <div class="about-stat"><strong data-likes>…</strong><span>Likes</span></div>
+              <div class="about-stat"><strong>🇲🇲</strong><span>Myanmar</span></div>
+            </div>
+            <div class="about-grid">
+              <article class="about-card">
+                <h3>DIY Bluetooth Jammers</h3>
+                <p>Custom boards with OLED displays. Builds and sells through TikTok orders.</p>
+              </article>
+              <article class="about-card">
+                <h3>Portable Power Stations</h3>
+                <p>DIY assembly tutorials and reviews for portable power solutions.</p>
+              </article>
+              <article class="about-card">
+                <h3>Personal AI (Jarvis Model)</h3>
+                <p>Development and demonstrations of advanced AI agent systems.</p>
+              </article>
+              <article class="about-card">
+                <h3>Robotics &amp; Emo Robot</h3>
+                <p>Reviews, demos, and tutorials for robotics projects and Emo robot interactions.</p>
+              </article>
+              <article class="about-card">
+                <h3>Tech Solutions &amp; Tutorials</h3>
+                <p>Telegram auto-selling systems, Bluetooth device connections, and tech tips.</p>
+              </article>
+              <article class="about-card">
+                <h3>Custom Gadgets Store</h3>
+                <p>Custom-built gadgets and devices sold directly through TikTok orders.</p>
+              </article>
+            </div>
+          </section>
+
+          <section id="about-contact" class="span-all">
+            <h2><span class="sec-ico" aria-hidden="true">📬</span>Contact</h2>
+            <p class="about-lede">Reach out for projects and collaborations.</p>
+            <div class="about-links">
+              <a class="ghost" href="https://github.com/thukhasusan78" target="_blank" rel="noopener noreferrer"><span class="ico" aria-hidden="true">💻</span>GitHub</a>
+              <a class="ghost" href="https://t.me/thukhasusan78" target="_blank" rel="noopener noreferrer"><span class="ico" aria-hidden="true">✈️</span>Telegram</a>
+              <a class="ghost" href="tel:09784679389"><span class="ico" aria-hidden="true">📞</span>09784679389</a>
+              <a class="ghost" href="https://www.tiktok.com/@thukhatech" target="_blank" rel="noopener noreferrer"><span class="ico" aria-hidden="true">🎵</span>TikTok @thukhatech</a>
+              <a class="ghost" href="https://t.me/thukhamovies" target="_blank" rel="noopener noreferrer"><span class="ico" aria-hidden="true">🎬</span>@thukhamovies</a>
+            </div>
+          </section>
+        </div>
       </div>
     </div>
 
@@ -600,6 +1029,8 @@
     const rpsYouEmoji = document.getElementById("rps-you-emoji");
     const rpsMickeyEmoji = document.getElementById("rps-mickey-emoji");
     const throwButtons = [...document.querySelectorAll("[data-throw]")];
+    const tttCells = [...document.querySelectorAll(".ttt-cell")];
+    const tttStatus = document.getElementById("ttt-status");
     const danceButtons = [...document.querySelectorAll("[data-dance]")];
     const chatLog = document.getElementById("chat-log");
     const chatForm = document.getElementById("chat-form");
@@ -623,6 +1054,7 @@
     let deviceState = "";
     let alarmSet = false;
     let rpsPhase = "idle";
+    let tttPhase = "idle";
     let rpsRoundId = null;
     let rpsPick = null;
     let rpsTimer = null;
@@ -649,10 +1081,13 @@
       const playable = online && !sleeping;
       danceButtons.forEach((btn) => { btn.disabled = !playable || thinking; });
       throwButtons.forEach((btn) => { btn.disabled = !playable || !counting; });
+      tttCells.forEach((btn) => { btn.disabled = !playable || tttPhase !== "your_turn"; });
       const playBtn = document.getElementById("btn-play");
       if (playBtn) playBtn.disabled = !playable || thinking || speaking || counting || matchOver || rpsPhase === "reveal";
       const newBtn = document.getElementById("btn-new");
       if (newBtn) newBtn.disabled = !playable || thinking || speaking;
+      const tttNew = document.getElementById("btn-ttt-new");
+      if (tttNew) tttNew.disabled = !playable || thinking || speaking;
       const chatOff = !playable || thinking || speaking || chatBusy || counting;
       chatInput.disabled = chatOff;
       chatSend.disabled = chatOff;
@@ -816,6 +1251,41 @@
     }
 
     function applyGame(msg) {
+      if (msg.game === "ttt") {
+        applyTtt(msg);
+        return;
+      }
+      applyRps(msg);
+    }
+
+    function applyTtt(msg) {
+      const marks = { x: "X", o: "O" };
+      const board = Array.isArray(msg.board) ? msg.board : [];
+      tttPhase = msg.phase || "idle";
+      tttCells.forEach((btn) => {
+        const idx = Number(btn.dataset.cell);
+        const mark = board[idx];
+        btn.textContent = marks[mark] || "";
+        btn.classList.toggle("last", msg.last_cell === idx);
+      });
+      tttStatus.classList.toggle("over", tttPhase === "match_over");
+      if (tttPhase === "your_turn") {
+        tttStatus.textContent = "Your turn — you are X.";
+      } else if (tttPhase === "mickey_turn") {
+        tttStatus.textContent = "Mickey is thinking…";
+      } else if (msg.winner === "player") {
+        tttStatus.textContent = "You win! Tap New game to play again.";
+      } else if (msg.winner === "mickey") {
+        tttStatus.textContent = "Mickey wins. Tap New game to play again.";
+      } else if (msg.winner === "draw") {
+        tttStatus.textContent = "Draw. Tap New game to play again.";
+      } else {
+        tttStatus.textContent = "Tap New game. You are X — Mickey is O.";
+      }
+      setControls();
+    }
+
+    function applyRps(msg) {
       rpsScore.textContent = scoreLine(msg);
       rpsScore.classList.toggle("over", msg.phase === "match_over");
       if (msg.phase === "countdown") {
@@ -1030,10 +1500,25 @@
       rpsPhase = "awaiting_throw";
       rpsRoundId = null;
       clearRpsPick();
+      tttPhase = "idle";
       send({ type: "game.start", game: "rps", best_of: 3 });
     });
     document.getElementById("btn-play").addEventListener("click", () => {
       send({ type: "game.round", game: "rps" });
+    });
+    document.getElementById("btn-ttt-new").addEventListener("click", () => {
+      stopRpsCountdown();
+      rpsPhase = "awaiting_throw";
+      rpsRoundId = null;
+      clearRpsPick();
+      tttPhase = "your_turn";
+      send({ type: "game.start", game: "ttt" });
+    });
+    tttCells.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (tttPhase !== "your_turn") return;
+        send({ type: "game.move", game: "ttt", cell: Number(btn.dataset.cell) });
+      });
     });
     danceButtons.forEach((btn) => {
       btn.addEventListener("click", () => send({ type: "command.dance", action: btn.dataset.dance }));
@@ -1114,7 +1599,61 @@
 
     const TABS = ["home", "play", "chat", "settings"];
 
+    function setPortfolioOpen(open) {
+      const panel = document.getElementById("portfolio-panel");
+      const btn = document.getElementById("btn-portfolio");
+      if (!panel || !btn) return;
+      panel.classList.toggle("is-open", open);
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+      btn.classList.toggle("picked", open);
+      const label = btn.querySelector(".portfolio-btn-label");
+      if (label) label.textContent = open ? "Hide Creator Portfolio" : "View Creator Portfolio";
+      if (open) loadTikTokStats();
+    }
+
+    async function loadTikTokStats() {
+      const box = document.getElementById("tiktok-stats");
+      if (!box) return;
+      const followers = box.querySelector("[data-followers]");
+      const likes = box.querySelector("[data-likes]");
+      box.classList.add("is-loading");
+      if (followers) followers.textContent = "…";
+      if (likes) likes.textContent = "…";
+      try {
+        const res = await fetch("/api/tiktok_stats", { credentials: "same-origin" });
+        if (!res.ok) throw new Error("stats");
+        const data = await res.json();
+        if (followers) followers.textContent = (data.formatted && data.formatted.followers) || "—";
+        if (likes) likes.textContent = (data.formatted && data.formatted.likes) || "—";
+      } catch {
+        if (followers) followers.textContent = "—";
+        if (likes) likes.textContent = "—";
+      } finally {
+        box.classList.remove("is-loading");
+      }
+    }
+
+    document.querySelectorAll(".about-photo img").forEach((img) => {
+      const show = () => img.parentElement.classList.add("has-img");
+      img.addEventListener("load", show);
+      img.addEventListener("error", () => img.parentElement.classList.remove("has-img"));
+      if (img.complete && img.naturalWidth) show();
+    });
+
+    document.getElementById("btn-portfolio").addEventListener("click", () => {
+      const panel = document.getElementById("portfolio-panel");
+      const open = !panel.classList.contains("is-open");
+      setPortfolioOpen(open);
+      if (open) {
+        if (location.hash !== "#about") history.replaceState(null, "", "#about");
+      } else if (location.hash === "#about") {
+        history.replaceState(null, "", "#settings");
+      }
+    });
+
     function showTab(name) {
+      const scrollAbout = name === "about";
+      if (scrollAbout) name = "settings";
       if (TABS.indexOf(name) === -1) name = "home";
       document.querySelectorAll(".tab-page").forEach((el) => {
         el.classList.toggle("is-active", el.id === "tab-" + name);
@@ -1124,7 +1663,13 @@
         btn.classList.toggle("is-active", on);
         btn.setAttribute("aria-selected", on ? "true" : "false");
       });
-      if (location.hash !== "#" + name) history.replaceState(null, "", "#" + name);
+      const hash = "#" + (scrollAbout ? "about" : name);
+      if (location.hash !== hash) history.replaceState(null, "", hash);
+      if (scrollAbout) {
+        setPortfolioOpen(true);
+        const about = document.getElementById("about");
+        if (about) about.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
     }
 
     document.querySelector(".tab-bar").addEventListener("click", (event) => {

@@ -11,6 +11,7 @@ from app.api.rate_limit import limiter
 from app.companion.chat import CHAT_HISTORY, normalize_chat_text
 from app.companion.errors import CompanionError
 from app.companion.games.rps import THROW_GRACE_S, THROWS, RpsMatch
+from app.companion.games.ttt import TttMatch
 from app.companion.life import (
     achievement_frame,
     achievements_state,
@@ -62,8 +63,8 @@ class CompanionHub:
         self.store = store
         self._viewers: dict[str, set[WebSocket]] = {}
         self._client_ids: dict[str, str] = {}
-        self._matches: dict[str, RpsMatch] = {}
-        self._rps_tasks: dict[str, asyncio.Task] = {}
+        self._matches: dict[str, RpsMatch | TttMatch] = {}
+        self._game_tasks: dict[str, asyncio.Task] = {}
         self._chat: dict[str, list[dict[str, Any]]] = {}
         self._care_tap_at: dict[str, float] = {}
         self._asleep: set[str] = set()
@@ -235,20 +236,20 @@ class CompanionHub:
         await self.unlock(device_id, client_id, "first_web_dance")
         await self.push_presence(device_id)
 
-    def _cancel_rps(self, key: str) -> None:
-        task = self._rps_tasks.pop(key, None)
+    def _cancel_game(self, key: str) -> None:
+        task = self._game_tasks.pop(key, None)
         if task is not None and not task.done():
             task.cancel()
 
-    def _spawn_rps(self, device_id: str, client_id: str) -> None:
+    def _spawn_game(self, device_id: str, coro, label: str) -> None:
         key = device_id.lower()
-        self._cancel_rps(key)
-        task = asyncio.create_task(self._run_rps_session(device_id, client_id))
-        self._rps_tasks[key] = task
+        self._cancel_game(key)
+        task = asyncio.create_task(coro)
+        self._game_tasks[key] = task
 
         def _done(done: asyncio.Task) -> None:
-            if self._rps_tasks.get(key) is done:
-                self._rps_tasks.pop(key, None)
+            if self._game_tasks.get(key) is done:
+                self._game_tasks.pop(key, None)
             if done.cancelled():
                 return
             try:
@@ -256,17 +257,22 @@ class CompanionHub:
             except asyncio.CancelledError:
                 return
             if exc is not None:
-                log.info("companion.rps_task_failed", device_id=device_id, error=str(exc))
+                log.info("companion.game_task_failed", device_id=device_id, game=label, error=str(exc))
 
         task.add_done_callback(_done)
+
+    def _spawn_rps(self, device_id: str, client_id: str) -> None:
+        self._spawn_game(device_id, self._run_rps_session(device_id, client_id), "rps")
 
     async def _stop(self, device_id: str) -> None:
         key = device_id.lower()
         match = self._matches.get(key)
         aborted = None
-        if match is not None and match.phase == "countdown":
+        if isinstance(match, RpsMatch) and match.phase == "countdown":
             aborted = match.abort_round()
-        self._cancel_rps(key)
+        elif isinstance(match, TttMatch) and match.phase == "mickey_turn":
+            aborted = match.abort_think()
+        self._cancel_game(key)
         session = self.sessions.get(device_id)
         if session is None or session.closed:
             if aborted:
@@ -276,6 +282,8 @@ class CompanionHub:
         await session.companion_action("stop", {})
         if aborted:
             await self.broadcast(device_id, aborted)
+            if isinstance(match, TttMatch) and aborted.get("winner"):
+                await self._credit_ttt(device_id, self._client_id(device_id), aborted)
         await self.push_presence(device_id)
 
     async def _game_start(
@@ -283,17 +291,24 @@ class CompanionHub:
     ) -> None:
         session = self._require_session(device_id)
         game = str(message.get("game") or "rps")
-        if game != "rps":
-            raise CompanionError("invalid", "Only rock-paper-scissors is available.")
+        if game not in {"rps", "ttt"}:
+            raise CompanionError("invalid", "That game is not available.")
         if session.state.state in {SessionState.THINKING, SessionState.SPEAKING}:
             raise CompanionError("busy", "Mickey is busy. Tap Stop first.")
+        key = device_id.lower()
+        self._cancel_game(key)
+        if game == "ttt":
+            difficulty = str(message.get("difficulty") or "medium")
+            match = TttMatch()
+            started = match.start(difficulty)
+            self._matches[key] = match
+            await self.broadcast(device_id, started)
+            return
         best_of = message.get("best_of", 3)
         try:
             best_of_n = int(best_of)
         except (TypeError, ValueError):
             best_of_n = 3
-        key = device_id.lower()
-        self._cancel_rps(key)
         match = RpsMatch()
         started = match.start(best_of_n)
         self._matches[key] = match
@@ -304,21 +319,25 @@ class CompanionHub:
         self, device_id: str, message: dict[str, Any], client_id: str = ""
     ) -> None:
         if str(message.get("game") or "rps") != "rps":
-            raise CompanionError("invalid", "Only rock-paper-scissors is available.")
+            raise CompanionError("invalid", "Tic-tac-toe has no rounds. Tap New game.")
         session = self._require_session(device_id)
         if session.state.state in {SessionState.THINKING, SessionState.SPEAKING}:
             raise CompanionError("busy", "Mickey is busy. Tap Stop first.")
         key = device_id.lower()
         match = self._matches.get(key)
+        if isinstance(match, TttMatch):
+            raise CompanionError("invalid", "Tic-tac-toe has no rounds. Tap New game.")
         if match is None:
             match = RpsMatch()
             match.start()
             self._matches[key] = match
+        if not isinstance(match, RpsMatch):
+            raise CompanionError("invalid", "Only rock-paper-scissors uses rounds.")
         if match.phase == "match_over":
             raise CompanionError("invalid", "Match over. Tap New match.")
         if match.phase == "countdown":
             raise CompanionError("busy", "Mickey is throwing. Wait for the reveal.")
-        running = self._rps_tasks.get(key)
+        running = self._game_tasks.get(key)
         if running is not None and not running.done():
             raise CompanionError("busy", "Mickey is throwing. Wait for the reveal.")
         self._spawn_rps(device_id, client_id)
@@ -331,7 +350,7 @@ class CompanionHub:
                 if session is None or session.closed:
                     return
                 match = self._matches.get(key)
-                if match is None or match.phase == "match_over":
+                if not isinstance(match, RpsMatch) or match.phase == "match_over":
                     return
                 if session.state.state in {SessionState.THINKING, SessionState.SPEAKING}:
                     await asyncio.sleep(0.25)
@@ -346,14 +365,14 @@ class CompanionHub:
 
                 async def reveal_now(expected_id: str = match_id) -> dict[str, Any]:
                     current = self._matches.get(key)
-                    if current is None or current.match_id != expected_id:
+                    if not isinstance(current, RpsMatch) or current.match_id != expected_id:
                         return {"aborted": True}
                     if current.phase != "countdown":
                         return {"aborted": True}
                     await current.wait_for_throw(THROW_GRACE_S)
                     current = self._matches.get(key)
                     if (
-                        current is None
+                        not isinstance(current, RpsMatch)
                         or current.match_id != expected_id
                         or current.phase != "countdown"
                     ):
@@ -370,7 +389,7 @@ class CompanionHub:
                 except CompanionError as exc:
                     current = self._matches.get(key)
                     if (
-                        current is not None
+                        isinstance(current, RpsMatch)
                         and current.match_id == match_id
                         and current.phase == "countdown"
                     ):
@@ -383,7 +402,7 @@ class CompanionHub:
                     return
 
                 current = self._matches.get(key)
-                if current is None or current.match_id != match_id:
+                if not isinstance(current, RpsMatch) or current.match_id != match_id:
                     return
                 if current.last_winner == "player":
                     await self.unlock(device_id, client_id, "first_rps_win")
@@ -398,25 +417,121 @@ class CompanionHub:
         except asyncio.CancelledError:
             return
 
+    async def _credit_ttt(self, device_id: str, client_id: str, state: dict[str, Any]) -> None:
+        winner = state.get("winner")
+        if winner == "player":
+            await self.unlock(device_id, client_id, "first_ttt_win")
+        if winner in {"player", "mickey", "draw"}:
+            await self.credit(device_id, client_id, "game")
+
+    async def _run_ttt_think(self, device_id: str, client_id: str) -> None:
+        key = device_id.lower()
+        try:
+            session = self.sessions.get(device_id)
+            if session is None or session.closed:
+                return
+            match = self._matches.get(key)
+            if not isinstance(match, TttMatch) or match.phase != "mickey_turn":
+                return
+            match_id = match.match_id
+            try:
+                await session.companion_action("ttt_react", {"mode": "think"})
+            except CompanionError as exc:
+                current = self._matches.get(key)
+                if isinstance(current, TttMatch) and current.match_id == match_id:
+                    state = current.apply_pending()
+                    await self.broadcast(device_id, state)
+                    if state.get("winner"):
+                        await self._credit_ttt(device_id, client_id, state)
+                if exc.code != "offline":
+                    await self.broadcast(device_id, error_frame(exc.code, exc.message))
+                return
+            current = self._matches.get(key)
+            if not isinstance(current, TttMatch) or current.match_id != match_id:
+                return
+            state = current.apply_pending()
+            await self.broadcast(device_id, state)
+            if state.get("winner"):
+                await self._run_ttt_result(device_id, client_id, str(state["winner"]))
+        except asyncio.CancelledError:
+            return
+
+    async def _run_ttt_result(self, device_id: str, client_id: str, winner: str) -> None:
+        session = self.sessions.get(device_id)
+        if session is None or session.closed:
+            return
+        try:
+            await session.companion_action("ttt_react", {"mode": "result", "winner": winner})
+        except CompanionError as exc:
+            if exc.code != "offline":
+                await self.broadcast(device_id, error_frame(exc.code, exc.message))
+            return
+        match = self._matches.get(device_id.lower())
+        state = match.to_state() if isinstance(match, TttMatch) else {"winner": winner}
+        await self._credit_ttt(device_id, client_id, state)
+        await self.push_presence(device_id)
+
     async def _game_move(
         self, device_id: str, message: dict[str, Any], client_id: str = ""
     ) -> None:
-        if str(message.get("game") or "rps") != "rps":
-            raise CompanionError("invalid", "Only rock-paper-scissors is available.")
+        game = str(message.get("game") or "rps")
+        if game == "ttt":
+            await self._ttt_move(device_id, message, client_id)
+            return
+        if game != "rps":
+            raise CompanionError("invalid", "That game is not available.")
         player = str(message.get("player") or "")
         if player not in THROWS:
             raise CompanionError("invalid", "Choose rock, paper, or scissors.")
         self._require_session(device_id)
         key = device_id.lower()
         match = self._matches.get(key)
-        if match is None or match.phase != "countdown":
-            if match is not None and match.phase == "match_over":
+        if not isinstance(match, RpsMatch) or match.phase != "countdown":
+            if isinstance(match, RpsMatch) and match.phase == "match_over":
                 raise CompanionError("invalid", "Match over. Tap New match.")
             raise CompanionError("invalid", "Wait for the chant, then throw.")
         try:
             match.commit(player)
         except ValueError as exc:
             raise CompanionError("invalid", "Wait for the chant, then throw.") from exc
+
+    async def _ttt_move(
+        self, device_id: str, message: dict[str, Any], client_id: str
+    ) -> None:
+        session = self._require_session(device_id)
+        if session.state.state in {SessionState.THINKING, SessionState.SPEAKING}:
+            raise CompanionError("busy", "Mickey is busy. Tap Stop first.")
+        key = device_id.lower()
+        match = self._matches.get(key)
+        if not isinstance(match, TttMatch):
+            raise CompanionError("invalid", "Start a tic-tac-toe game first.")
+        if match.phase == "match_over":
+            raise CompanionError("invalid", "Game over. Tap New game.")
+        if match.phase == "mickey_turn":
+            raise CompanionError("busy", "Mickey is thinking.")
+        raw = message.get("cell")
+        try:
+            cell = int(raw)
+        except (TypeError, ValueError):
+            raise CompanionError("invalid", "Pick a square 1 to 9.") from None
+        try:
+            state = match.play(cell)
+        except ValueError as exc:
+            reason = str(exc)
+            if reason == "occupied":
+                raise CompanionError("invalid", "That square is taken.") from exc
+            raise CompanionError("invalid", "Pick an empty square.") from exc
+        await self.broadcast(device_id, state)
+        if state.get("winner"):
+            self._spawn_game(
+                device_id,
+                self._run_ttt_result(device_id, client_id, str(state["winner"])),
+                "ttt",
+            )
+            return
+        thinking = match.begin_mickey()
+        await self.broadcast(device_id, thinking)
+        self._spawn_game(device_id, self._run_ttt_think(device_id, client_id), "ttt")
 
     async def _chat_send(
         self, device_id: str, message: dict[str, Any], client_id: str = ""

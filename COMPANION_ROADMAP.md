@@ -1,6 +1,6 @@
 # Companion dashboard — remaining phases
 
-**Status:** Phases 1–4 are shipped. This file is the source of truth for **Phase 5 onward**.  
+**Status:** Phases 1–4 and Phase 5 tic-tac-toe are shipped. This file is the source of truth for **remaining Phase 5 games (Simon, trivia) and Phase 6 onward**.  
 **Date:** 2026-09-01  
 **Site:** https://phoelone.thukha.online/  
 **Related:** [PRODUCTION_MASTER_PLAN.md](PRODUCTION_MASTER_PLAN.md) (P2.1, P2.2, P2.5), [backend_spec.md](backend_spec.md) §2.4 and §12, [BACKEND_PRODUCTION_PLAN.md](BACKEND_PRODUCTION_PLAN.md).
@@ -18,7 +18,7 @@ Do not implement from this file until a phase is explicitly scheduled. Do not sk
 | [3. Phase 2 — Phone chat](#3-phase-2--phone-chat) | **Shipped.** Text on the site → Mickey speaks |
 | [4. Phase 3 — Memory, care, achievements](#4-phase-3--memory-care-achievements) | **Shipped.** Postgres personality + light Tamagotchi |
 | [5. Phase 4 — Alarm and settings](#5-phase-4--alarm-and-settings) | **Shipped.** UI over existing MCP; user-only tools |
-| [6. Phase 5 — More games](#6-phase-5--more-games) | Tic-tac-toe, Simon, trivia |
+| [6. Phase 5 — More games](#6-phase-5--more-games) | **TTT shipped.** Simon, trivia still open |
 | [7. Phase 6 — Always-on + LCD icons](#7-phase-6--always-on--lcd-icons) | Firmware keepalive; optional `preview_image` |
 | [8. Later / gated](#8-later--gated) | Sensors widgets, OTA UI, camera |
 | [9. Suggested order](#9-suggested-build-order) | Smallest verticals |
@@ -34,16 +34,16 @@ The portal is a cookie-gated companion app, not activation-only. [`app/templates
 | Cookie auth + PIN unlock | [`app/companion/auth.py`](app/companion/auth.py), [`app/api/portal.py`](app/api/portal.py), [`app/api/companion.py`](app/api/companion.py) |
 | Browser hub | [`app/companion/hub.py`](app/companion/hub.py) on `app.state.companion` |
 | Device API | `DeviceSession.companion_action` / `presence_snapshot` / `refresh_status` in [`app/sessions/session.py`](app/sessions/session.py) |
-| RPS + dance | [`app/companion/games/rps.py`](app/companion/games/rps.py), [`app/companion/reactions.py`](app/companion/reactions.py) |
+| RPS + TTT + dance | [`app/companion/games/rps.py`](app/companion/games/rps.py), [`app/companion/games/ttt.py`](app/companion/games/ttt.py), [`app/companion/reactions.py`](app/companion/reactions.py) |
 | Chat / care / memory / alarm / settings | Hub + [`app/db/companion_store.py`](app/db/companion_store.py) (Alembic `0004_companion_memory`) |
 | UI | [`app/templates/dashboard.html`](app/templates/dashboard.html) (activation: [`index.html`](app/templates/index.html)) |
 | Wire protocol | [backend_spec.md](backend_spec.md) §12 |
 
-**UI shell:** dark-playful night-sky theme, emoji on tabs/actions. Sticky header (presence + Stop). Four panes — **Home** (care, alarm), **Play** (dance pad, RPS), **Chat**, **Settings** (owner memory, volume/theme/trims, reboot/OTA, logout). Phone: bottom tab bar. PC (≥900px): full-viewport layout with a left sidebar; ≥1100px splits Home/Play/Settings into two columns. Jinja + inline vanilla JS; no second protocol, no `/static/` mount.
+**UI shell:** dark-playful night-sky theme, emoji on tabs/actions. Sticky header (presence + Stop). Four panes — **Home** (care, alarm), **Play** (dance pad, RPS, tic-tac-toe), **Chat**, **Settings** (owner memory, volume/theme/trims, reboot/OTA, logout). Phone: bottom tab bar. PC (≥900px): full-viewport layout with a left sidebar; ≥1100px splits Home/Play/Settings into two columns. Jinja + inline vanilla JS; no second protocol, no `/static/` mount.
 
-**What the user can do today:** activate → dashboard → presence, care meters, alarm, chat, dance, RPS, owner memory, device settings. Mickey must already have `/xiaozhi/v1/` open for body reactions (“Wake Mickey first”). Optional `COMPANION_PIN` stamps the same cookie on a second browser (the 6-digit robot code is one-shot bind only).
+**What the user can do today:** activate → dashboard → presence, care meters, alarm, chat, dance, RPS, tic-tac-toe, owner memory, device settings. Mickey must already have `/xiaozhi/v1/` open for body reactions (“Wake Mickey first”). Optional `COMPANION_PIN` stamps the same cookie on a second browser (the 6-digit robot code is one-shot bind only).
 
-**What is not built:** extra games (tic-tac-toe, Simon, trivia), firmware idle keepalive so play works without a wake, LCD icon push (`preview_image`), per-device pairing accounts (PIN is still a server-wide env secret).
+**What is not built:** extra games (Simon, trivia), firmware idle keepalive so play works without a wake, LCD icon push (`preview_image`), per-device pairing accounts (PIN is still a server-wide env secret).
 
 ---
 
@@ -272,9 +272,11 @@ LCD snapshot/preview: Phase 6, not required here.
 
 ## 6. Phase 5 — More games
 
-Same hub + `companion_action("rps_react")` pattern as Phase 1. New engines under `app/companion/games/`. LCD stays a face unless Phase 6 icons exist.
+Same hub + `companion_action("rps_react")` / `ttt_react` pattern as Phase 1. New engines under `app/companion/games/`. LCD stays a face unless Phase 6 icons exist.
 
 ### 6.1 Tic-tac-toe
+
+**Status: shipped.** Play tab has a 3×3 board. Engine is [`app/companion/games/ttt.py`](app/companion/games/ttt.py). Protocol is in [backend_spec.md](backend_spec.md) §12.
 
 - Board only on the web.
 - **Minimax on the server** (easy/medium). Do not spend Gemini tokens per move.
@@ -354,7 +356,8 @@ Not companion-dashboard blockers.
 | Slice | Ship | Depends on |
 |-------|------|------------|
 | **2–4** | Chat, memory, care, alarm, settings, tabbed SPA | **Done** |
-| **5** | TTT → Simon → trivia | Phase 1 game pipe |
+| **5a** | Tic-tac-toe | **Done** |
+| **5b** | Simon → trivia | Phase 1 game pipe |
 | **6a** | Firmware keepalive | phoelone P0 ping/pong |
 | **6b** | LCD `preview_image` | firmware preview + static assets |
 
@@ -371,7 +374,7 @@ Keep ignoring unknown `type`s. Phases 2–4 are already in [backend_spec.md](bac
 | 2 | `chat.send`, `chat.user`, `chat.reply` — **in spec** |
 | 3 | `memory.*`, `care.*`, `achieve.unlock` / `achieve.state` — **in spec** |
 | 4 | `alarm.*`, `sleep.now`, `settings.*` — **in spec** |
-| 5 | `game.start` / `game.move` with new `game` enums |
+| 5 | `game.start` / `game.move` with `game: "ttt"` — **in spec**; Simon / trivia still later |
 | 6 | none required (firmware + optional preview MCP) |
 
 ---

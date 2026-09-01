@@ -4,7 +4,7 @@ XiaoZhi-compatible brain for the ESP32 Mickey client ([thukhasusan78/phoelone](h
 
 The device posts to `/xiaozhi/ota/`, receives a WebSocket URL, then speaks over `wss://…/xiaozhi/v1/`. MQTT/UDP is omitted from OTA JSON so the robot stays on the WebSocket voice path. Camera boards may POST `/vision/explain/` (stub until a camera is wired).
 
-The XiaoZhi **wire protocol** (hello, listen, TTS, MCP) is in [backend_spec.md](backend_spec.md). Servo-hold firmware patches historically lived in [firmware/otto-robot/README.md](firmware/otto-robot/README.md); live code is `main/boards/mickey/` on the firmware repo.
+The XiaoZhi **wire protocol** (hello, listen, TTS, MCP) is in [backend_spec.md](backend_spec.md). **Firmware to implement now** (phoelone repo, board `mickey`): [FIRMWARE_NOW.md](FIRMWARE_NOW.md). Servo-hold patches historically lived in [firmware/otto-robot/README.md](firmware/otto-robot/README.md); live code is `main/boards/mickey/` on the firmware repo.
 
 ## Architecture
 

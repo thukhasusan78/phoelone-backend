@@ -44,6 +44,7 @@ from app.companion.reactions import (
     rps_recover_motion,
     rps_think_motion,
     rps_timeout_line,
+    ttt_plan,
 )
 from app.companion.status import (
     alarm_set_args,
@@ -1483,6 +1484,8 @@ class DeviceSession:
             async with self._companion_lock:
                 if kind == "rps_react":
                     return await self._companion_rps_react(payload)
+                if kind == "ttt_react":
+                    return await self._companion_ttt_react(payload)
                 if kind == "chat":
                     return await self._companion_chat(payload)
                 if kind == "alarm_get":
@@ -1615,6 +1618,53 @@ class DeviceSession:
                 await self.mcp.call("self.otto.action", plan.motion)
             except McpError as exc:
                 log.info("companion.rps_motion_failed", session_id=self.session_id, error=str(exc))
+                return
+            if plan.motion.get("action") == "sit":
+                await asyncio.sleep(RPS_SIT_HOLD_S)
+            if plan.motion.get("action") != "home":
+                await self._rps_home(False)
+
+        if generation == self.state.generation:
+            await asyncio.gather(
+                self._speak(plan.line, generation, emotion=plan.end_emotion),
+                react_body(),
+            )
+            await self._apply_emotion(plan.end_emotion)
+        return _finish({"ok": True, "skipped": inhibited})
+
+    async def _companion_ttt_react(self, args: dict[str, Any]) -> dict[str, Any]:
+        if self.state.state in {SessionState.THINKING, SessionState.SPEAKING}:
+            raise CompanionError("busy", "Mickey is busy. Tap Stop first.")
+        mode = str(args.get("mode") or "result")
+        generation = self.state.generation
+        inhibited = self._motion_inhibited()
+
+        def _finish(payload: dict[str, Any]) -> dict[str, Any]:
+            if self.state.state != SessionState.CLOSED:
+                self._set_state(SessionState.READY, force=True)
+            return payload
+
+        if mode == "think":
+            self._set_state(SessionState.THINKING, force=True)
+            await self._apply_emotion("thinking")
+            if not inhibited and generation == self.state.generation:
+                try:
+                    await self.mcp.call("self.otto.action", rps_think_motion())
+                except McpError as exc:
+                    log.info("companion.ttt_motion_failed", session_id=self.session_id, error=str(exc))
+            return _finish({"ok": True, "skipped": inhibited})
+
+        winner = str(args.get("winner") or "draw")
+        plan = ttt_plan(winner)
+        await self._apply_emotion(plan.end_emotion)
+
+        async def react_body() -> None:
+            if inhibited:
+                return
+            try:
+                await self.mcp.call("self.otto.action", plan.motion)
+            except McpError as exc:
+                log.info("companion.ttt_motion_failed", session_id=self.session_id, error=str(exc))
                 return
             if plan.motion.get("action") == "sit":
                 await asyncio.sleep(RPS_SIT_HOLD_S)

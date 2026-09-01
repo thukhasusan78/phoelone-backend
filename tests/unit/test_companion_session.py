@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -305,6 +305,88 @@ async def test_game_start_busy_while_thinking() -> None:
     with pytest.raises(CompanionError) as exc:
         await hub.handle("aa:bb:cc:dd:ee:ff", {"type": "game.start", "game": "rps"})
     assert exc.value.code == "busy"
+
+
+@pytest.mark.asyncio
+async def test_ttt_start_replaces_rps_match() -> None:
+    from app.companion.games.rps import RpsMatch
+    from app.companion.games.ttt import TttMatch
+    from app.companion.hub import CompanionHub
+
+    session = _session()
+
+    class _Sessions:
+        def get(self, _device_id):
+            return session
+
+    hub = CompanionHub(_Sessions())
+    hub.broadcast = AsyncMock()
+    rps = RpsMatch()
+    rps.start()
+    hub._matches["aa:bb:cc:dd:ee:ff"] = rps
+    await hub.handle("aa:bb:cc:dd:ee:ff", {"type": "game.start", "game": "ttt"})
+    assert isinstance(hub._matches["aa:bb:cc:dd:ee:ff"], TttMatch)
+    assert hub._matches["aa:bb:cc:dd:ee:ff"].phase == "your_turn"
+
+
+@pytest.mark.asyncio
+async def test_ttt_stop_applies_pending_o() -> None:
+    from app.companion.games.ttt import TttMatch
+    from app.companion.hub import CompanionHub
+
+    session = _session()
+    match = TttMatch()
+    match.start("medium")
+    match.play(0)
+    match.begin_mickey()
+    pending = match._pending
+    assert pending is not None
+
+    class _Sessions:
+        def get(self, _device_id):
+            return session
+
+    hub = CompanionHub(_Sessions())
+    hub.broadcast = AsyncMock()
+    hub.push_presence = AsyncMock()
+    hub._matches["aa:bb:cc:dd:ee:ff"] = match
+    await hub.handle("aa:bb:cc:dd:ee:ff", {"type": "command.stop"})
+    assert match.board[pending] == "o"
+    assert match._pending is None
+    assert session.mcp.calls[-1][0] == "self.otto.stop"
+
+
+@pytest.mark.asyncio
+async def test_companion_ttt_think_does_not_speak() -> None:
+    session = _session()
+    spoken: list[str] = []
+
+    async def _capture_speak(text, _generation, emotion="happy"):
+        spoken.append(str(text))
+
+    session._speak = _capture_speak
+    await session.companion_action("ttt_react", {"mode": "think"})
+    assert spoken == []
+    actions = [args.get("action") for name, args in session.mcp.calls if name == "self.otto.action"]
+    assert actions == ["swing"]
+    assert session.state.state == SessionState.READY
+
+
+@pytest.mark.asyncio
+async def test_companion_ttt_result_speaks_and_homes() -> None:
+    session = _session()
+    spoken: list[str] = []
+
+    async def _capture_speak(text, _generation, emotion="happy"):
+        spoken.append(str(text))
+
+    session._speak = _capture_speak
+    await session.companion_action("ttt_react", {"mode": "result", "winner": "mickey"})
+    assert spoken
+    actions = [args.get("action") for name, args in session.mcp.calls if name == "self.otto.action"]
+    assert "jump" in actions
+    assert actions[-1] == "home"
+    assert session.state.state == SessionState.READY
 
 
 @pytest.mark.asyncio

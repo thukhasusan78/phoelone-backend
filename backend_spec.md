@@ -903,7 +903,7 @@ or a bare JSON-RPC object. MCP replies are broadcast to those clients. Do not co
 
 ## 12. Companion dashboard (browser)
 
-Cloud UI at `https://phoelone.thukha.online/` after activation. The browser never receives the device WebSocket bearer. The page is a SPA: four panes (Home = care + alarm; Play = dance + RPS; Chat; Settings = memory + device controls + logout). Switching tabs must not navigate or reload.
+Cloud UI at `https://phoelone.thukha.online/` after activation. The browser never receives the device WebSocket bearer. The page is a SPA: four panes (Home = care + alarm; Play = dance + RPS + tic-tac-toe; Chat; Settings = memory + device controls + logout). Switching tabs must not navigate or reload.
 
 **URL:** `wss://phoelone.thukha.online/companion/v1/` (and `/companion/v1`). Cookie `companion` required before `accept`; otherwise close `1008`. Rate limit: `COMPANION_RATE_LIMIT_PER_MINUTE` (default 30).
 
@@ -915,7 +915,7 @@ Do not send these frames to the ESP32. The hub translates them to existing XiaoZ
 |--------|--------|
 | `hello` | `device_id` |
 | `presence` | `online`, `state`, `emotion`, `battery`, `charging`, optional `sleeping` / `rebooting`, optional `hint` |
-| `game.state` | `game: rps`, `match_id`, optional `round_id`, `you`, `mickey`, `winner`, `score`, `best_of`, `wins_needed`, `phase` (`awaiting_throw` \| `countdown` \| `match_over`), optional `countdown_ms` / `committed` while `phase` is `countdown`, optional `match_winner` when the match is over, optional `timeout` if nobody threw in time (both throws stay hidden until the reveal frame) |
+| `game.state` | `game: rps` or `game: ttt`. **RPS:** `match_id`, optional `round_id`, `you`, `mickey`, `winner`, `score`, `best_of`, `wins_needed`, `phase` (`awaiting_throw` \| `countdown` \| `match_over`), optional `countdown_ms` / `committed` while `phase` is `countdown`, optional `match_winner` when the match is over, optional `timeout` if nobody threw in time (both throws stay hidden until the reveal frame). **TTT:** `match_id`, `board` (9 slots `null` \| `"x"` \| `"o"`), `turn` (`player` \| `mickey` \| `null`), `phase` (`your_turn` \| `mickey_turn` \| `match_over`), `winner` (`player` \| `mickey` \| `draw` \| `null`), optional `last_cell` 0–8, `difficulty` (`easy` \| `medium`) |
 | `error` | `code` (`offline` \| `busy` \| `invalid` \| `rate_limited`), `message` |
 | `chat.user` | `text` — echo of a typed companion line (capped at 400 chars) |
 | `chat.reply` | `text`, `emotion` — after Mickey speaks the answer |
@@ -932,9 +932,9 @@ Do not send these frames to the ESP32. The hub translates them to existing XiaoZ
 |--------|--------|
 | `command.dance` | `action` — allowlist: walk, jump, swing, moonwalk, bend, shake_leg, updown, sit, showcase, home |
 | `command.stop` | none — `self.otto.stop`, abort if speaking or thinking |
-| `game.start` | `game: rps`, optional `best_of` (default 3) — resets the match and Mickey starts the first chant |
-| `game.round` | `game: rps` — start the next chant without resetting the score |
-| `game.move` | `game: rps`, `player`: rock \| paper \| scissors — only during `countdown`; both throws reveal together after the chant |
+| `game.start` | `game: rps`, optional `best_of` (default 3) — resets the match and Mickey starts the first chant. `game: ttt`, optional `difficulty` (`easy` \| `medium`, default `medium`) — empty board, player is X and starts. Starting either game cancels the other |
+| `game.round` | `game: rps` — start the next chant without resetting the score. Invalid for `ttt` |
+| `game.move` | `game: rps`, `player`: rock \| paper \| scissors — only during `countdown`; both throws reveal together after the chant. `game: ttt`, `cell` 0–8 — only during `your_turn`; occupied / wrong turn is `error.invalid` |
 | `chat.send` | `text` — typed line; empty/whitespace is `error.invalid` |
 | `memory.get` | none |
 | `memory.set` | optional `owner_name`, `nickname`, `likes` (capped; stored in Postgres / in-memory stub) |
@@ -952,9 +952,11 @@ If the device session is absent, commands fail with `offline` and presence shows
 
 RPS is chant-first on the existing companion pipe: `game.start` (or `game.round`) broadcasts `phase: countdown` with both throws hidden while the device speaks `tts` “Rock… Paper… Scissors!” on `/xiaozhi/v1/`. The owner taps `game.move` *during* that chant. When countdown TTS finishes, the hub broadcasts the result `game.state`; Mickey’s jump/sit/home reaction and a win/lose/draw `tts` line start on the same tick, then `home` returns him to stand. First to 2 of 3 wins; `match_over` + `match_winner` end the match until `game.start`.
 
+Tic-tac-toe is turn-based on the same pipe (no Gemini referee). `game.start { game: "ttt" }` broadcasts an empty board (`phase: your_turn`). Each `game.move { cell }` places X; the server then picks O with minimax (`medium`) or a 40% random mix (`easy`), broadcasts `mickey_turn` while Mickey silently swings, then places O. Win/lose/draw uses the same jump/sit/home + canned Burmese as RPS, only when the game ends. `game.round` is RPS-only. One match per device.
+
 Phone chat reuses the device Gemini Live socket (`send_client_content`, no second session and no uplink PCM). `chat.send` echoes `chat.user` immediately, then `companion_action("chat")` injects the typed line. THINKING or SPEAKING refuses a new chat (`busy` — tap Stop). Chat is also capped at 10 messages/minute (`COMPANION_CHAT_RATE_LIMIT_PER_MINUTE`). Transcripts stay in RAM (last 10) for open dashboard tabs.
 
-Owner memory is per `device_id` + `client_id` and is injected into Gemini `system_instruction` at Live configure (not by mutating the global prompt string). Care meters decay from a lifespan `asyncio` task about every 8 minutes. Achievements are an event log (`first_activate`, `first_web_dance`, `first_rps_win`, `chat_streak_3`, `first_pet`).
+Owner memory is per `device_id` + `client_id` and is injected into Gemini `system_instruction` at Live configure (not by mutating the global prompt string). Care meters decay from a lifespan `asyncio` task about every 8 minutes. Achievements are an event log (`first_activate`, `first_web_dance`, `first_rps_win`, `first_ttt_win`, `chat_streak_3`, `first_pet`).
 
 Alarm and settings are device MCP on the same companion pipe. `alarm.*` maps to `self.mickey.alarm.*` / `self.mickey.sleep.now`; the robot clock is source of truth (offline → `error.offline`, no server-side cron). `settings.set` uses volume/brightness/theme plus optional `trims`. `settings.reboot` and `settings.upgrade` list user-only tools with `withUserTools: true` on a separate map (never `gemini_tools`). Upgrade never accepts a URL from the browser. Do not call `self.set_press_to_talk`.
 

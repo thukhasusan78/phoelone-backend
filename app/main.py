@@ -3,9 +3,11 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import httpx
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from redis.asyncio import Redis
 
 from app.ai.gemini import GeminiLiveBrain, KeyPool
@@ -155,6 +157,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(ota.router)
     application.include_router(vision.router)
     application.include_router(websocket.router)
+    static_dir = Path(__file__).resolve().parent / "static"
+    if static_dir.is_dir():
+        application.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
     return application
 
 

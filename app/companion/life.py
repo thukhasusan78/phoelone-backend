@@ -30,6 +30,7 @@ ACHIEVEMENT_TITLES = {
     "first_activate": "First hello",
     "first_web_dance": "First web dance",
     "first_rps_win": "Beat Mickey",
+    "first_ttt_win": "Tic-tac-toe champ",
     "chat_streak_3": "Three chats",
     "first_pet": "First pet",
 }
