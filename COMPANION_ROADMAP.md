@@ -1,11 +1,11 @@
 # Companion dashboard — remaining phases
 
-**Status:** planning document only. Phase 1 is already shipped. This file is the source of truth for **Phase 2 onward**.  
-**Date:** 2026-08-30  
+**Status:** Phases 1–4 are shipped. This file is the source of truth for **Phase 5 onward**.  
+**Date:** 2026-09-01  
 **Site:** https://phoelone.thukha.online/  
 **Related:** [PRODUCTION_MASTER_PLAN.md](PRODUCTION_MASTER_PLAN.md) (P2.1, P2.2, P2.5), [backend_spec.md](backend_spec.md) §2.4 and §12, [BACKEND_PRODUCTION_PLAN.md](BACKEND_PRODUCTION_PLAN.md).
 
-Do not implement from this file until a phase is explicitly scheduled. Do not skip Phase 1 invariants.
+Do not implement from this file until a phase is explicitly scheduled. Do not skip Phase 1 invariants. Sections 3–5 stay as the design record for work that already landed.
 
 ---
 
@@ -13,11 +13,11 @@ Do not implement from this file until a phase is explicitly scheduled. Do not sk
 
 | Section | Purpose |
 |---------|---------|
-| [1. Phase 1 baseline](#1-phase-1-baseline-already-shipped) | What the dashboard already does |
+| [1. Shipped baseline](#1-shipped-baseline) | What the dashboard does today (phases 1–4) |
 | [2. Invariants](#2-invariants) | Rules later phases must not break |
-| [3. Phase 2 — Phone chat](#3-phase-2--phone-chat) | Text on the site → Mickey speaks |
-| [4. Phase 3 — Memory, care, achievements](#4-phase-3--memory-care-achievements) | Postgres personality + light Tamagotchi |
-| [5. Phase 4 — Alarm and settings](#5-phase-4--alarm-and-settings) | UI over existing MCP; user-only tools |
+| [3. Phase 2 — Phone chat](#3-phase-2--phone-chat) | **Shipped.** Text on the site → Mickey speaks |
+| [4. Phase 3 — Memory, care, achievements](#4-phase-3--memory-care-achievements) | **Shipped.** Postgres personality + light Tamagotchi |
+| [5. Phase 4 — Alarm and settings](#5-phase-4--alarm-and-settings) | **Shipped.** UI over existing MCP; user-only tools |
 | [6. Phase 5 — More games](#6-phase-5--more-games) | Tic-tac-toe, Simon, trivia |
 | [7. Phase 6 — Always-on + LCD icons](#7-phase-6--always-on--lcd-icons) | Firmware keepalive; optional `preview_image` |
 | [8. Later / gated](#8-later--gated) | Sensors widgets, OTA UI, camera |
@@ -25,9 +25,9 @@ Do not implement from this file until a phase is explicitly scheduled. Do not sk
 
 ---
 
-## 1. Phase 1 baseline (already shipped)
+## 1. Shipped baseline
 
-The portal is no longer activation-only.
+The portal is a cookie-gated companion app, not activation-only. [`app/templates/dashboard.html`](app/templates/dashboard.html) is a **single-page app**: tab switches only toggle pane visibility (`display`) so the `/companion/v1/` WebSocket stays up. Do not navigate or reload on tab change.
 
 | Piece | Where |
 |-------|--------|
@@ -35,12 +35,15 @@ The portal is no longer activation-only.
 | Browser hub | [`app/companion/hub.py`](app/companion/hub.py) on `app.state.companion` |
 | Device API | `DeviceSession.companion_action` / `presence_snapshot` / `refresh_status` in [`app/sessions/session.py`](app/sessions/session.py) |
 | RPS + dance | [`app/companion/games/rps.py`](app/companion/games/rps.py), [`app/companion/reactions.py`](app/companion/reactions.py) |
-| UI | [`app/templates/dashboard.html`](app/templates/dashboard.html) |
+| Chat / care / memory / alarm / settings | Hub + [`app/db/companion_store.py`](app/db/companion_store.py) (Alembic `0004_companion_memory`) |
+| UI | [`app/templates/dashboard.html`](app/templates/dashboard.html) (activation: [`index.html`](app/templates/index.html)) |
 | Wire protocol | [backend_spec.md](backend_spec.md) §12 |
 
-**What the user can do today:** activate → dashboard → presence / dance pad / Stop / RPS. Mickey must already have `/xiaozhi/v1/` open (“Wake Mickey first”).
+**UI shell:** dark-playful night-sky theme, emoji on tabs/actions. Sticky header (presence + Stop). Four panes — **Home** (care, alarm), **Play** (dance pad, RPS), **Chat**, **Settings** (owner memory, volume/theme/trims, reboot/OTA, logout). Phone: bottom tab bar. PC (≥900px): full-viewport layout with a left sidebar; ≥1100px splits Home/Play/Settings into two columns. Jinja + inline vanilla JS; no second protocol, no `/static/` mount.
 
-**What is not built:** phone chat, care meters, owner memory, achievements, alarm UI, extra games, firmware idle keepalive, LCD icon push.
+**What the user can do today:** activate → dashboard → presence, care meters, alarm, chat, dance, RPS, owner memory, device settings. Mickey must already have `/xiaozhi/v1/` open for body reactions (“Wake Mickey first”). Optional `COMPANION_PIN` stamps the same cookie on a second browser (the 6-digit robot code is one-shot bind only).
+
+**What is not built:** extra games (tic-tac-toe, Simon, trivia), firmware idle keepalive so play works without a wake, LCD icon push (`preview_image`), per-device pairing accounts (PIN is still a server-wide env secret).
 
 ---
 
@@ -77,6 +80,8 @@ flowchart LR
 ---
 
 ## 3. Phase 2 — Phone chat
+
+**Status: shipped.** Chat lives on the Chat tab. Protocol is in [backend_spec.md](backend_spec.md) §12.
 
 **Goal:** type on the phone; Mickey answers in Burmese on the speaker with a face. Highest EMO-app feel after RPS.
 
@@ -135,11 +140,13 @@ New **Chat** section on [`dashboard.html`](app/templates/dashboard.html): text f
 
 ## 4. Phase 3 — Memory, care, achievements
 
+**Status: shipped.** Home tab has meters + badges; Settings tab has **Mickey knows me**. Alembic `0004_companion_memory` is applied.
+
 **Goal:** Mickey remembers the owner, and the Home screen has light Tamagotchi meters + badges. Maps to master-plan **P2.2**.
 
 ### 4.1 Owner memory (do this first)
 
-Postgres is device/token-only today ([`devices`](app/db/sqlalchemy_repo.py)). Chat context dies with the process ([README.md](README.md)).
+Postgres already has `owner_memory` / `care_state` / `achievements` besides [`devices`](app/db/sqlalchemy_repo.py). Chat transcripts still die with the process ([README.md](README.md)).
 
 New table `owner_memory` (Alembic `0004_companion_memory`, revises `0003_token_ciphertext`):
 
@@ -206,6 +213,8 @@ Home: three meters + badges. Settings or Home footer: memory editor.
 ---
 
 ## 5. Phase 4 — Alarm and settings
+
+**Status: shipped.** Alarm is on Home; volume, theme, trims, reboot, and OTA confirm are on Settings. Gemini still cannot see user-only tools.
 
 **Goal:** dashboard UI for clocks and lab controls that already exist on the device. Maps to **P2.1** (greeting/sleep) + leftover **P2.5** (user-only MCP).
 
@@ -344,10 +353,7 @@ Not companion-dashboard blockers.
 
 | Slice | Ship | Depends on |
 |-------|------|------------|
-| **2** | Phone chat | Phase 1 hub + Live `send_client_content` |
-| **3a** | Owner memory + Alembic | Postgres in prod; memory stub in tests |
-| **3b** | Care meters + achievements | 3a table style; lifespan tick |
-| **4** | Alarm + Settings UI | Device MCP; user-only list flag |
+| **2–4** | Chat, memory, care, alarm, settings, tabbed SPA | **Done** |
 | **5** | TTT → Simon → trivia | Phase 1 game pipe |
 | **6a** | Firmware keepalive | phoelone P0 ping/pong |
 | **6b** | LCD `preview_image` | firmware preview + static assets |
@@ -358,13 +364,13 @@ Stop after each slice and add contract tests the way Phase 1 did (`tests/contrac
 
 ## 10. Protocol additions (summary)
 
-Keep ignoring unknown `type`s. Extend §12 of `backend_spec.md` when a phase lands — not before.
+Keep ignoring unknown `type`s. Phases 2–4 are already in [backend_spec.md](backend_spec.md) §12. Extend §12 when a later phase lands — not before.
 
 | Phase | New browser `type`s |
 |-------|---------------------|
-| 2 | `chat.send`, `chat.user`, `chat.reply` |
-| 3 | `memory.*`, `care.*`, `achieve.unlock` |
-| 4 | `alarm.*`, `sleep.now`, `settings.*` (or HTTP forms) |
+| 2 | `chat.send`, `chat.user`, `chat.reply` — **in spec** |
+| 3 | `memory.*`, `care.*`, `achieve.unlock` / `achieve.state` — **in spec** |
+| 4 | `alarm.*`, `sleep.now`, `settings.*` — **in spec** |
 | 5 | `game.start` / `game.move` with new `game` enums |
 | 6 | none required (firmware + optional preview MCP) |
 
@@ -380,4 +386,5 @@ Keep ignoring unknown `type`s. Extend §12 of `backend_spec.md` when a phase lan
 | New games | Server engines | Same as RPS; no Gemini referee |
 | Always-on play | Firmware keepalive (Phase 6) | Phase 1 cannot invent a device connection |
 | Settings / reboot | User-only MCP | P2.5; never in `gemini_tools` |
+| Dashboard chrome | SPA tabs; visibility toggle only | Reloading would drop `/companion/v1/` |
 | Camera games | Not planned | No camera on this SKU |

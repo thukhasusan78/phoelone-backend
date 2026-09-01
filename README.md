@@ -17,12 +17,12 @@ ESP32  --WS--->  DeviceSession
                    └─ Device MCP (walk, stop, volume, face, …)
 ```
 
-1. **Auth:** opaque WebSocket tokens after OTA. Unknown devices get a 6-digit activation code (portal at `/`) and cannot open WebSocket until bound. Identity is `Device-Id` + `Client-Id` + bearer over TLS. A successful activate sets a signed `companion` cookie and opens the dashboard (presence, dance pad, Rock-Paper-Scissors). The browser talks `wss://…/companion/v1/`; it never sees the device bearer. Mickey must be awake (device `/xiaozhi/v1/` open) for body reactions. Optional `COMPANION_PIN` unlocks the dashboard from another browser.
+1. **Auth:** opaque WebSocket tokens after OTA. Unknown devices get a 6-digit activation code (portal at `/`) and cannot open WebSocket until bound. Identity is `Device-Id` + `Client-Id` + bearer over TLS. A successful activate sets a signed `companion` cookie and opens the dashboard. The browser talks `wss://…/companion/v1/` (cookie auth); it never sees the device bearer. The dashboard is a **SPA** (Home / Play / Chat / Settings): tab switches only toggle visibility so the companion WebSocket stays connected. Phone uses a bottom tab bar; a wide PC layout uses a left sidebar and the full viewport. Features: presence, care meters, alarm, chat, dance pad, Rock-Paper-Scissors, owner memory, volume/theme/trims, reboot/OTA. Mickey must be awake (device `/xiaozhi/v1/` open) for body reactions. Optional `COMPANION_PIN` unlocks the dashboard from another browser without a new robot code.
 2. **Server Silero VAD:** in auto/wake-word mode the ESP32 often does **not** send `listen/stop`. The server endpoints on non-speech (`VAD_MIN_SILENCE_MS`, default 800 ms) or `MAX_FORWARDED_AUDIO_SECONDS`, then sends `tts/start` so the device leaves listening.
 3. **Gemini Live** (`gemini-3.1-flash-live-preview`): gated 16 kHz PCM with manual `activity_start` / `activity_end`. Native response audio is discarded; output transcription is Burmese Unicode only.
 4. **Edge TTS:** `my-MM-NilarNeural` (fallback Thiha). Downlink Opus is paced (5-frame burst, then 60 ms/frame) so the ESP32 1.2 s decode queue does not drop mid-sentence audio.
 5. **Chat context:** not stored in Postgres, Redis, or on the device. One Gemini Live socket per device WebSocket holds Google-side context (plus an in-RAM resumption handle on reconnect). A new process or new device session starts empty. When a song ends, the server sends Gemini an INTERNAL EVENT (`send_client_content`) with title/artist/status so the Live session knows playback stopped; a short Burmese wrap-up may be spoken before `tts/stop`.
-6. **Postgres** stores device records and tokens only. **Redis** caches some host-tool JSON (not `search_music`).
+6. **Postgres** stores device records, tokens, owner memory, care meters, and achievements. **Redis** caches some host-tool JSON (not `search_music`). Chat transcripts stay in hub RAM only.
 
 ## Quick start (development)
 

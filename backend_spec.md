@@ -23,13 +23,15 @@ ESP32 (mickey firmware)
   │  boot
   ├─ HTTP POST  /xiaozhi/ota/           →  websocket NVS, optional firmware URL, activation code if unbound
   ├─ HTTP POST  /xiaozhi/ota/activate   →  202 until portal bind, then 200
-  ├─ HTTPS GET  /                       →  6-digit activation portal
+  ├─ HTTPS GET  /                       →  activation form, or companion dashboard if `companion` cookie is valid
   ├─ WebSocket  wss://phoelone.thukha.online/xiaozhi/v1/   →  hello, Opus, JSON, MCP
+  ├─ WebSocket  wss://phoelone.thukha.online/companion/v1/  →  browser hub (cookie; not the device protocol)
   └─ optional MQTT + UDP          →  same JSON as WS; audio on UDP/AES-CTR
 
 VPS backend (you implement)
   ├─ OTA HTTP service
   ├─ WebSocket voice session (ASR → LLM → TTS → MCP)
+  ├─ Companion dashboard (Jinja SPA + `/companion/v1/` hub)
   ├─ Server-side tools (weather, news, music, knowledge, email, …)
   └─ Device-side MCP client (initialize, tools/list, tools/call)
 ```
@@ -165,7 +167,7 @@ The device parses these **top-level objects**. Unknown keys are ignored. String/
 
 **Web portal:** `GET /` (HTML form). `POST /activate` with form field `code` or JSON `{"code":"123456"}`. A valid pending code marks the device `active` and sets an HttpOnly `companion` cookie (`device_id` + `client_id`, HMAC with `AUTH_PEPPER`, default 30 days). Codes expire after `ACTIVATION_TTL_S` (default 15 minutes); the next OTA issues a new code.
 
-`GET /` with a valid companion cookie renders the dashboard (presence, dance pad, Rock-Paper-Scissors). Without a cookie it stays the activation form. `POST /companion/logout` clears the cookie. If `COMPANION_PIN` is set, `POST /companion/unlock` (`pin` form/JSON) binds the same cookie to the active device so a second browser can open the dashboard.
+`GET /` with a valid companion cookie renders the dashboard SPA ([`app/templates/dashboard.html`](app/templates/dashboard.html)): sticky presence header, Home / Play / Chat / Settings panes, bottom tab bar on phone and a left sidebar plus full-viewport grid on PC (≥900px). Tab switches only toggle pane visibility — they must not reload the document (that would drop `/companion/v1/`). Without a cookie it stays the activation form. `POST /companion/logout` clears the cookie. If `COMPANION_PIN` is set, `POST /companion/unlock` (`pin` form/JSON) binds the same cookie to the active device so a second browser can open the dashboard (the 6-digit robot code is a one-shot bind, not a login).
 
 **Companion WebSocket:** `wss://…/companion/v1/` (cookie auth, close `1008` if missing). JSON frames only — this is **not** the XiaoZhi device protocol. See §12.
 
@@ -901,7 +903,7 @@ or a bare JSON-RPC object. MCP replies are broadcast to those clients. Do not co
 
 ## 12. Companion dashboard (browser)
 
-Cloud UI at `https://phoelone.thukha.online/` after activation. The browser never receives the device WebSocket bearer.
+Cloud UI at `https://phoelone.thukha.online/` after activation. The browser never receives the device WebSocket bearer. The page is a SPA: four panes (Home = care + alarm; Play = dance + RPS; Chat; Settings = memory + device controls + logout). Switching tabs must not navigate or reload.
 
 **URL:** `wss://phoelone.thukha.online/companion/v1/` (and `/companion/v1`). Cookie `companion` required before `accept`; otherwise close `1008`. Rate limit: `COMPANION_RATE_LIMIT_PER_MINUTE` (default 30).
 
@@ -919,9 +921,10 @@ Do not send these frames to the ESP32. The hub translates them to existing XiaoZ
 | `chat.reply` | `text`, `emotion` — after Mickey speaks the answer |
 | `memory.state` | `owner_name`, `nickname`, `likes`, `locale` |
 | `care.state` | `happiness`, `energy`, `bond`, `streak_days`, `updated_at` |
+| `achieve.state` | `codes`, optional `titles` — bootstrap of earned badges |
 | `achieve.unlock` | `code`, `title` — once when a badge is earned |
 | `alarm.state` | `set`, `hour`, `minute`, `repeat` — robot clock; never a server cron |
-| `settings.state` | `volume`, `brightness`, `theme`, `firmware_version`, `can_upgrade` |
+| `settings.state` | `volume`, `brightness`, `theme`, `firmware_version`, `can_upgrade`, optional `trims` |
 
 **Browser → server**
 

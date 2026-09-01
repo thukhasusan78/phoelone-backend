@@ -3,18 +3,20 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#0f172a">
+  <meta name="theme-color" content="#1a0b2e">
   <title>Mickey — Home</title>
   <style>
     :root {
-      --bg: #0b1220;
-      --card: #131c31;
-      --ink: #f8fafc;
-      --muted: #94a3b8;
-      --accent: #38bdf8;
-      --accent-2: #34d399;
+      --bg: #12081f;
+      --card: #1c1330ee;
+      --ink: #fff7fb;
+      --muted: #c4b5d4;
+      --accent: #f472b6;
+      --accent-2: #22d3ee;
+      --mint: #34d399;
+      --gold: #fbbf24;
       --danger: #fb7185;
-      --line: #243049;
+      --line: #a78bfa44;
     }
     * { box-sizing: border-box; }
     html, body {
@@ -25,8 +27,9 @@
     body {
       font-family: ui-rounded, "Segoe UI", system-ui, -apple-system, sans-serif;
       background:
-        radial-gradient(1200px 600px at 10% -10%, #1d4ed833, transparent 55%),
-        radial-gradient(900px 500px at 110% 10%, #0ea5e933, transparent 50%),
+        radial-gradient(900px 520px at 8% -8%, #db277766, transparent 58%),
+        radial-gradient(780px 480px at 108% 6%, #06b6d455, transparent 52%),
+        radial-gradient(640px 420px at 50% 110%, #f59e0b33, transparent 55%),
         var(--bg);
       color: var(--ink);
       min-height: 100dvh;
@@ -41,22 +44,25 @@
       padding: 12px 16px 0;
       gap: 12px;
     }
+    header, section {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      box-shadow: 0 12px 40px #7c3aed33, inset 0 1px 0 #ffffff22;
+    }
     header {
       flex-shrink: 0;
-      background: color-mix(in srgb, var(--card) 92%, black);
-      border: 1px solid var(--line);
-      border-radius: 24px;
       padding: 16px 18px 14px;
-      box-shadow: 0 24px 80px #00000066;
     }
     .top { display: flex; align-items: center; gap: 12px; }
     .top .title { flex: 1; min-width: 0; }
     .header-stop { margin-left: auto; flex-shrink: 0; padding: 10px 16px; }
     .mark {
-      width: 44px; height: 44px; border-radius: 14px;
+      width: 48px; height: 48px; border-radius: 50%;
       display: grid; place-items: center;
-      background: linear-gradient(160deg, var(--accent), #6366f1);
+      background: linear-gradient(160deg, #fb7185, #c084fc 45%, #38bdf8);
       font-weight: 800;
+      box-shadow: 0 8px 22px #f472b655, inset 0 -6px 10px #83184344;
     }
     h1 { font-size: 1.25rem; margin: 0; letter-spacing: -0.03em; }
     .sub { color: var(--muted); font-size: 0.85rem; margin-top: 2px; }
@@ -67,46 +73,66 @@
       padding: 6px 12px;
       font-size: 0.8rem;
       color: var(--muted);
+      background: #2a184866;
     }
-    .pill.on { border-color: #34d39966; color: #a7f3d0; background: #064e3b44; }
-    .pill.off { border-color: #fb718544; color: var(--danger); background: #4c051933; }
+    .pill.on {
+      border-color: #34d39988;
+      color: #bbf7d0;
+      background: #064e3b66;
+      box-shadow: 0 0 16px #34d39944;
+    }
+    .pill.off {
+      border-color: #fb718566;
+      color: var(--danger);
+      background: #4c051944;
+      box-shadow: 0 0 14px #fb718533;
+    }
     .banner {
-      border-radius: 14px;
+      border-radius: 16px;
       padding: 12px 14px;
       margin-top: 14px;
       font-size: 0.95rem;
-      background: #1e3a5f66;
-      color: #bae6fd;
+      background: linear-gradient(90deg, #1e3a8a66, #7c3aed44);
+      color: #e0f2fe;
       display: none;
     }
     .banner.show { display: block; }
-    .banner.err { background: #4c051966; color: var(--danger); }
-    section {
-      background: color-mix(in srgb, var(--card) 92%, black);
-      border: 1px solid var(--line);
-      border-radius: 24px;
-      padding: 18px;
+    .banner.err { background: linear-gradient(90deg, #4c051966, #9f123966); color: var(--danger); }
+    section { padding: 18px; }
+    h2 {
+      margin: 0 0 12px;
+      font-size: 1.05rem;
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
-    h2 { margin: 0 0 12px; font-size: 1.05rem; }
+    .sec-ico { font-size: 1.2rem; line-height: 1; }
+    .ico { font-size: 1.05rem; line-height: 1; margin-right: 4px; }
     .row { display: flex; flex-wrap: wrap; gap: 8px; }
     button {
       border: 0;
-      border-radius: 14px;
+      border-radius: 16px;
       padding: 12px 14px;
       font-size: 0.95rem;
       font-weight: 700;
-      color: #042f2e;
-      background: linear-gradient(180deg, #5eead4, var(--accent-2));
+      color: #082f49;
+      background: linear-gradient(180deg, #67e8f9, var(--accent-2));
+      box-shadow: 0 8px 18px #22d3ee44;
       cursor: pointer;
     }
     button.ghost {
-      background: #0b1220;
+      background: linear-gradient(180deg, #2a1848, #1a0f30);
       color: var(--ink);
-      border: 1px solid var(--line);
+      border: 1px solid #a78bfa44;
+      box-shadow: 0 8px 20px #7c3aed22;
     }
-    button.stop { background: linear-gradient(180deg, #fda4af, var(--danger)); color: #4c0519; }
-    button:disabled { opacity: 0.45; cursor: not-allowed; }
-    button.picked { box-shadow: 0 0 0 3px #fde68a88; filter: brightness(1.08); }
+    button.stop {
+      background: linear-gradient(180deg, #fda4af, var(--danger));
+      color: #4c0519;
+      box-shadow: 0 8px 18px #f43f5e55;
+    }
+    button:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
+    button.picked { box-shadow: 0 0 0 3px #fde68acc, 0 8px 18px #fbbf2444; filter: brightness(1.08); }
     .chat-log {
       display: grid;
       gap: 8px;
@@ -122,7 +148,7 @@
     .bubble {
       max-width: 88%;
       padding: 10px 12px;
-      border-radius: 14px;
+      border-radius: 18px;
       font-size: 0.95rem;
       line-height: 1.35;
       white-space: pre-wrap;
@@ -130,29 +156,41 @@
     }
     .bubble.you {
       justify-self: end;
-      background: #1d4ed866;
-      border: 1px solid #38bdf866;
+      background: linear-gradient(180deg, #7c3aed88, #4f46e555);
+      border: 1px solid #c4b5fd88;
     }
     .bubble.mickey {
       justify-self: start;
-      background: #064e3b55;
-      border: 1px solid #34d39955;
+      background: linear-gradient(180deg, #db277766, #f472b644);
+      border: 1px solid #f9a8d488;
     }
     .chat-form { display: flex; gap: 8px; }
+    .chat-form input,
+    .memory-form input,
+    input[type="time"] {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 12px 14px;
+      background: #160a28;
+      color: var(--ink);
+    }
     .chat-form input {
       flex: 1;
       min-width: 0;
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      padding: 12px 14px;
-      background: #0b1220;
-      color: var(--ink);
       font-size: 1rem;
     }
     .chat-form input:disabled { opacity: 0.45; }
     .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; }
+    .dance-tile {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      padding: 14px 8px;
+    }
+    .dance-tile .ico { font-size: 1.45rem; margin: 0; }
     .score { color: var(--muted); margin: 0 0 12px; }
-    .score.over { color: #fde68a; }
+    .score.over { color: var(--gold); }
     .reveal { min-height: 1.4em; margin: 0 0 12px; color: var(--ink); }
     .rps-arena {
       display: grid;
@@ -161,9 +199,9 @@
       gap: 10px;
       margin: 0 0 14px;
       padding: 14px 10px;
-      border-radius: 18px;
+      border-radius: 22px;
       border: 1px solid var(--line);
-      background: #0b122066;
+      background: linear-gradient(180deg, #2a184866, #12081f88);
     }
     .rps-hand {
       display: grid;
@@ -173,15 +211,16 @@
     .rps-emoji {
       width: 72px;
       height: 72px;
-      border-radius: 20px;
+      border-radius: 22px;
       display: grid;
       place-items: center;
       font-size: 2.1rem;
-      background: #1e293b;
-      border: 1px solid #334155;
+      background: linear-gradient(180deg, #3b0764, #1e1b4b);
+      border: 1px solid #c084fc66;
+      box-shadow: 0 8px 20px #7c3aed33;
     }
     .rps-hand .tag { font-size: 0.75rem; color: var(--muted); font-weight: 700; }
-    .rps-vs { font-weight: 800; color: var(--muted); letter-spacing: 0.08em; }
+    .rps-vs { font-weight: 800; color: var(--gold); letter-spacing: 0.08em; }
     .rps-chant {
       display: flex;
       justify-content: center;
@@ -192,13 +231,13 @@
     .rps-chant span {
       font-weight: 800;
       font-size: 1.05rem;
-      color: #475569;
+      color: #6b5a80;
       opacity: 0.4;
       transform: scale(0.92);
       transition: transform 0.18s ease, color 0.18s ease, opacity 0.18s ease;
     }
     .rps-chant span.on {
-      color: #fde68a;
+      color: var(--gold);
       opacity: 1;
       transform: scale(1.12);
     }
@@ -206,7 +245,7 @@
     .rps-emoji.pop { animation: rps-pop 0.42s cubic-bezier(0.2, 1.4, 0.3, 1); }
     .rps-hand.win .rps-emoji {
       border-color: #34d39988;
-      box-shadow: 0 0 0 3px #34d39933, 0 10px 28px #34d39922;
+      box-shadow: 0 0 0 3px #34d39933, 0 10px 28px #34d39944;
     }
     .rps-hand.lose .rps-emoji { opacity: 0.55; }
     @keyframes rps-shake {
@@ -218,40 +257,38 @@
       70% { transform: scale(1.18); opacity: 1; }
       100% { transform: scale(1); }
     }
+    @keyframes tab-pop {
+      0% { transform: scale(0.85); }
+      60% { transform: scale(1.18); }
+      100% { transform: scale(1); }
+    }
     .foot { display: flex; justify-content: flex-end; }
-    .foot button { background: transparent; color: var(--muted); font-weight: 600; padding: 8px; }
+    .foot button { background: transparent; color: var(--muted); font-weight: 600; padding: 8px; box-shadow: none; }
     .meters { display: grid; gap: 10px; margin: 0 0 12px; }
     .meter { display: grid; gap: 4px; }
     .meter span { font-size: 0.8rem; color: var(--muted); font-weight: 700; }
     progress {
       width: 100%;
-      height: 10px;
+      height: 14px;
       border: 0;
       border-radius: 999px;
       overflow: hidden;
-      background: #0b1220;
+      background: #160a28;
     }
-    progress::-webkit-progress-bar { background: #0b1220; }
+    progress::-webkit-progress-bar { background: #160a28; }
     progress::-webkit-progress-value { background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
     .badges { display: flex; flex-wrap: wrap; gap: 6px; min-height: 1.4em; margin: 10px 0 0; }
     .badge {
-      border: 1px solid #34d39955;
-      background: #064e3b44;
-      color: #a7f3d0;
+      border: 1px solid #f9a8d466;
+      background: #83184355;
+      color: #fbcfe8;
       border-radius: 999px;
       padding: 4px 10px;
       font-size: 0.75rem;
       font-weight: 700;
     }
     .memory-form { display: grid; gap: 8px; }
-    .memory-form input {
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      padding: 12px 14px;
-      background: #0b1220;
-      color: var(--ink);
-      font-size: 0.95rem;
-    }
+    .memory-form input { font-size: 0.95rem; }
     .tog {
       display: flex;
       align-items: center;
@@ -260,25 +297,14 @@
       font-size: 0.9rem;
       font-weight: 700;
     }
-    input[type="time"] {
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      padding: 12px 14px;
-      background: #0b1220;
-      color: var(--ink);
-      font-size: 1.05rem;
-      font-weight: 700;
-    }
-    input[type="range"] {
-      width: 100%;
-      accent-color: var(--accent);
-    }
+    input[type="time"] { font-size: 1.05rem; font-weight: 700; }
+    input[type="range"] { width: 100%; accent-color: var(--accent); }
     .meter em { font-style: normal; color: var(--ink); }
     .tab-pages {
       flex: 1;
       min-height: 0;
       overflow-y: auto;
-      padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+      padding-bottom: 12px;
     }
     .tab-page { display: none; }
     .tab-page.is-active { display: grid; gap: 16px; }
@@ -295,33 +321,95 @@
     }
     #tab-chat .chat-log { flex: 1; max-height: none; }
     .tab-bar {
-      position: fixed;
-      bottom: 0;
-      left: 50%;
-      transform: translateX(-50%);
-      width: min(720px, 100%);
+      flex-shrink: 0;
       display: grid;
       grid-template-columns: repeat(4, 1fr);
       gap: 4px;
-      background: color-mix(in srgb, var(--card) 96%, black);
-      border-top: 1px solid var(--line);
-      padding: 6px 8px calc(8px + env(safe-area-inset-bottom, 0px));
+      margin: 0 0 10px;
+      padding: 8px 8px calc(8px + env(safe-area-inset-bottom, 0px));
+      border-radius: 22px;
+      background: color-mix(in srgb, #1c1330 92%, black);
+      border: 1px solid var(--line);
+      box-shadow: 0 12px 40px #7c3aed44, inset 0 1px 0 #ffffff22;
       z-index: 20;
     }
     .tab-bar button {
+      display: grid;
+      justify-items: center;
+      gap: 3px;
       background: transparent;
       color: var(--muted);
       border: 0;
-      border-radius: 14px;
-      padding: 10px 4px;
-      font-size: 0.72rem;
+      border-radius: 16px;
+      padding: 8px 4px 6px;
+      font-size: 0.7rem;
       font-weight: 700;
       letter-spacing: 0.02em;
       box-shadow: none;
     }
+    .tab-ico { font-size: 1.25rem; line-height: 1; }
     .tab-bar button.is-active {
-      color: var(--accent);
-      background: #38bdf814;
+      color: #fff;
+      background: linear-gradient(180deg, #f472b655, #7c3aed55);
+    }
+    .tab-bar button.is-active .tab-ico { animation: tab-pop 0.28s ease; }
+
+    @media (min-width: 900px) {
+      .wrap.app-shell {
+        width: 100%;
+        max-width: none;
+        display: grid;
+        grid-template-columns: 220px minmax(0, 1fr);
+        grid-template-rows: auto minmax(0, 1fr);
+        grid-template-areas:
+          "header header"
+          "nav main";
+        padding: 18px 22px 18px;
+        gap: 16px;
+      }
+      header { grid-area: header; }
+      .tab-pages {
+        grid-area: main;
+        padding-bottom: 0;
+        height: 100%;
+      }
+      .tab-page.is-active { min-height: 100%; align-content: start; }
+      .tab-bar {
+        grid-area: nav;
+        grid-template-columns: 1fr;
+        align-content: start;
+        align-self: stretch;
+        margin: 0;
+        padding: 12px;
+        height: auto;
+      }
+      .tab-bar button {
+        grid-template-columns: auto 1fr;
+        justify-items: start;
+        align-items: center;
+        gap: 10px;
+        padding: 14px 16px;
+        font-size: 0.9rem;
+        text-align: left;
+      }
+      .tab-ico { font-size: 1.35rem; }
+      .grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
+      .rps-emoji { width: 88px; height: 88px; font-size: 2.4rem; }
+    }
+
+    @media (min-width: 1100px) {
+      #tab-home.is-active,
+      #tab-play.is-active,
+      #tab-settings.is-active {
+        grid-template-columns: 1fr 1fr;
+        align-items: stretch;
+      }
+      #tab-settings .foot { grid-column: 1 / -1; }
+      #tab-settings.is-active > section,
+      #tab-home.is-active > section,
+      #tab-play.is-active > section {
+        min-height: 100%;
+      }
     }
   </style>
 </head>
@@ -334,7 +422,7 @@
           <h1>Mickey</h1>
           <div class="sub" id="link-state">Connecting…</div>
         </div>
-        <button class="stop header-stop" id="btn-stop" type="button">Stop</button>
+        <button class="stop header-stop" id="btn-stop" type="button"><span class="ico" aria-hidden="true">🛑</span>Stop</button>
       </div>
       <div class="stats">
         <span class="pill off" id="online-pill">Offline</span>
@@ -348,7 +436,7 @@
     <div class="tab-pages">
       <div id="tab-home" class="tab-page is-active">
         <section>
-          <h2>Care</h2>
+          <h2><span class="sec-ico" aria-hidden="true">💖</span>Care</h2>
           <div class="meters">
             <div class="meter"><span>Happiness</span><progress id="meter-happy" max="100" value="55"></progress></div>
             <div class="meter"><span>Energy</span><progress id="meter-energy" max="100" value="70"></progress></div>
@@ -356,35 +444,35 @@
           </div>
           <p class="score" id="care-streak">Streak — 0 days</p>
           <div class="row">
-            <button type="button" id="btn-pet">Pet</button>
-            <button class="ghost" type="button" id="btn-feed">Snack</button>
+            <button type="button" id="btn-pet"><span class="ico" aria-hidden="true">🫶</span>Pet</button>
+            <button class="ghost" type="button" id="btn-feed"><span class="ico" aria-hidden="true">🍪</span>Snack</button>
           </div>
           <div class="badges" id="badges"></div>
         </section>
 
         <section>
-          <h2>Alarm</h2>
+          <h2><span class="sec-ico" aria-hidden="true">⏰</span>Alarm</h2>
           <p class="score" id="alarm-status">No alarm set</p>
           <div class="row" style="margin-bottom: 10px">
             <input id="alarm-time" type="time" value="07:00">
             <label class="tog"><input type="checkbox" id="alarm-repeat" checked> Daily</label>
           </div>
           <div class="row">
-            <button type="button" id="btn-alarm-save" class="needs-mickey">Save alarm</button>
-            <button type="button" id="btn-sleep" class="needs-mickey">Sleep now</button>
-            <button class="ghost needs-mickey" type="button" id="btn-alarm-cancel">Cancel alarm</button>
+            <button type="button" id="btn-alarm-save" class="needs-mickey"><span class="ico" aria-hidden="true">⏰</span>Save alarm</button>
+            <button type="button" id="btn-sleep" class="needs-mickey"><span class="ico" aria-hidden="true">😴</span>Sleep now</button>
+            <button class="ghost needs-mickey" type="button" id="btn-alarm-cancel"><span class="ico" aria-hidden="true">✖️</span>Cancel alarm</button>
           </div>
         </section>
       </div>
 
       <div id="tab-play" class="tab-page">
         <section>
-          <h2>Dance pad</h2>
+          <h2><span class="sec-ico" aria-hidden="true">💃</span>Dance pad</h2>
           <div class="grid" id="dance-pad"></div>
         </section>
 
         <section>
-          <h2>Rock · Paper · Scissors</h2>
+          <h2><span class="sec-ico" aria-hidden="true">✊</span>Rock · Paper · Scissors</h2>
           <p class="score" id="rps-score">Best of 3 — you 0 · Mickey 0</p>
           <div class="rps-arena" id="rps-arena">
             <div class="rps-hand" id="rps-you-hand">
@@ -404,46 +492,46 @@
           </div>
           <p class="reveal" id="rps-reveal">Tap New match. Mickey chants first — throw with him.</p>
           <div class="row" style="margin-bottom: 10px">
-            <button type="button" data-throw="rock">Rock</button>
-            <button type="button" data-throw="paper">Paper</button>
-            <button type="button" data-throw="scissors">Scissors</button>
-            <button type="button" id="btn-play">Play round</button>
-            <button class="ghost" type="button" id="btn-new">New match</button>
+            <button type="button" data-throw="rock"><span class="ico" aria-hidden="true">✊</span>Rock</button>
+            <button type="button" data-throw="paper"><span class="ico" aria-hidden="true">✋</span>Paper</button>
+            <button type="button" data-throw="scissors"><span class="ico" aria-hidden="true">✌️</span>Scissors</button>
+            <button type="button" id="btn-play"><span class="ico" aria-hidden="true">▶️</span>Play round</button>
+            <button class="ghost" type="button" id="btn-new"><span class="ico" aria-hidden="true">✨</span>New match</button>
           </div>
         </section>
       </div>
 
       <div id="tab-chat" class="tab-page">
         <section>
-          <h2>Chat</h2>
+          <h2><span class="sec-ico" aria-hidden="true">💬</span>Chat</h2>
           <div class="chat-log" id="chat-log"></div>
           <form class="chat-form" id="chat-form">
             <input id="chat-input" type="text" maxlength="400" autocomplete="off" placeholder="Say something to Mickey…">
-            <button type="submit" id="chat-send">Send</button>
+            <button type="submit" id="chat-send"><span class="ico" aria-hidden="true">💌</span>Send</button>
           </form>
         </section>
       </div>
 
       <div id="tab-settings" class="tab-page">
         <section>
-          <h2>Mickey knows me</h2>
+          <h2><span class="sec-ico" aria-hidden="true">🧠</span>Mickey knows me</h2>
           <form class="memory-form" id="memory-form">
             <input id="mem-name" type="text" maxlength="48" autocomplete="name" placeholder="Your name">
             <input id="mem-nick" type="text" maxlength="48" placeholder="What you call Mickey">
             <input id="mem-likes" type="text" maxlength="160" placeholder="Things you like">
-            <button type="submit" id="mem-save">Save</button>
+            <button type="submit" id="mem-save"><span class="ico" aria-hidden="true">💾</span>Save</button>
           </form>
         </section>
 
         <section>
-          <h2>Settings</h2>
+          <h2><span class="sec-ico" aria-hidden="true">⚙️</span>Settings</h2>
           <div class="meters">
             <div class="meter"><span>Volume <em id="vol-label">70</em></span><input id="set-volume" class="needs-mickey" type="range" min="0" max="100" value="70"></div>
             <div class="meter"><span>Brightness <em id="bri-label">80</em></span><input id="set-brightness" class="needs-mickey" type="range" min="0" max="100" value="80"></div>
           </div>
           <div class="row" style="margin-bottom: 10px">
-            <button class="ghost needs-mickey" type="button" id="theme-dark">Dark face</button>
-            <button class="ghost needs-mickey" type="button" id="theme-light">Light face</button>
+            <button class="ghost needs-mickey" type="button" id="theme-dark"><span class="ico" aria-hidden="true">🌙</span>Dark face</button>
+            <button class="ghost needs-mickey" type="button" id="theme-light"><span class="ico" aria-hidden="true">☀️</span>Light face</button>
           </div>
           <p class="score" id="fw-version">Firmware —</p>
           <div class="meters" id="trim-meters">
@@ -453,46 +541,46 @@
             <div class="meter"><span>Right foot <em id="trim-right_foot-label">0</em></span><input id="trim-right_foot" class="needs-mickey" type="range" min="-50" max="50" value="0"></div>
           </div>
           <div class="row">
-            <button class="ghost needs-mickey" type="button" id="btn-reboot">Reboot</button>
-            <button class="stop needs-mickey" type="button" id="btn-upgrade">Install update</button>
+            <button class="ghost needs-mickey" type="button" id="btn-reboot"><span class="ico" aria-hidden="true">🔄</span>Reboot</button>
+            <button class="stop needs-mickey" type="button" id="btn-upgrade"><span class="ico" aria-hidden="true">⬇️</span>Install update</button>
           </div>
         </section>
 
         <div class="foot">
           <form method="post" action="/companion/logout">
-            <button type="submit">Log out</button>
+            <button type="submit"><span class="ico" aria-hidden="true">👋</span>Log out</button>
           </form>
         </div>
       </div>
     </div>
 
     <nav class="tab-bar" role="tablist" aria-label="Companion sections">
-      <button type="button" role="tab" data-tab="home" class="is-active" aria-selected="true">Home</button>
-      <button type="button" role="tab" data-tab="play" aria-selected="false">Play</button>
-      <button type="button" role="tab" data-tab="chat" aria-selected="false">Chat</button>
-      <button type="button" role="tab" data-tab="settings" aria-selected="false">Settings</button>
+      <button type="button" role="tab" data-tab="home" class="is-active" aria-selected="true"><span class="tab-ico" aria-hidden="true">🏠</span>Home</button>
+      <button type="button" role="tab" data-tab="play" aria-selected="false"><span class="tab-ico" aria-hidden="true">🎮</span>Play</button>
+      <button type="button" role="tab" data-tab="chat" aria-selected="false"><span class="tab-ico" aria-hidden="true">💬</span>Chat</button>
+      <button type="button" role="tab" data-tab="settings" aria-selected="false"><span class="tab-ico" aria-hidden="true">⚙️</span>Settings</button>
     </nav>
   </div>
   <script>
     const DANCES = [
-      ["walk", "Walk"],
-      ["jump", "Jump"],
-      ["swing", "Swing"],
-      ["moonwalk", "Moonwalk"],
-      ["bend", "Bend"],
-      ["shake_leg", "Shake"],
-      ["updown", "Up-down"],
-      ["sit", "Sit"],
-      ["showcase", "Showcase"],
-      ["home", "Home"],
+      ["walk", "Walk", "🚶"],
+      ["jump", "Jump", "🦘"],
+      ["swing", "Swing", "🎵"],
+      ["moonwalk", "Moonwalk", "🌙"],
+      ["bend", "Bend", "🙇"],
+      ["shake_leg", "Shake", "🦵"],
+      ["updown", "Up-down", "↕️"],
+      ["sit", "Sit", "🪑"],
+      ["showcase", "Showcase", "✨"],
+      ["home", "Home", "🏠"],
     ];
     const pad = document.getElementById("dance-pad");
-    DANCES.forEach(([action, label]) => {
+    DANCES.forEach(([action, label, icon]) => {
       const btn = document.createElement("button");
-      btn.className = "ghost";
+      btn.className = "ghost dance-tile";
       btn.type = "button";
       btn.dataset.dance = action;
-      btn.textContent = label;
+      btn.innerHTML = "<span class=\"ico\" aria-hidden=\"true\">" + icon + "</span>" + label;
       pad.appendChild(btn);
     });
 

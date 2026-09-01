@@ -450,10 +450,10 @@ P1 does **not** require a persistent WS in idle. Optional later: lightweight hea
 | ID | Item | Owner |
 |----|------|-------|
 | P2.1 | Time-of-day sleep / morning greeting | FW+BE |
-| P2.2 | Persistent memory (owner name, likes) in Postgres → system prompt | BE |
+| P2.2 | Persistent memory (owner name, likes) in Postgres → system prompt — **BE shipped** (dashboard Settings + Live inject) | BE |
 | P2.3 | Signed OTA, dual-bank, per-board channel `phoe-lone` | FW+BE+OPS |
 | P2.4 | Server AEC + protocol v2 + `listen: realtime` (hardware AEC still preferred) | FW+BE |
-| P2.5 | Companion pairing app (user-only MCP) | BE+app |
+| P2.5 | Companion pairing app (user-only MCP) — **BE dashboard shipped**; cookie + optional `COMPANION_PIN`; no native phone app | BE+app |
 | P2.6 | Crash dump upload, per-MAC metrics | FW+BE |
 | P2.7 | Myanmar glyph-push / font | FW+BE |
 | P2.8 | Camera / ToF face-proximity — **only if** that hardware exists | HW+FW |

@@ -1,6 +1,6 @@
 # Phoe Lone Backend Production Plan (Python / FastAPI)
 
-**Status:** P0.5 / P0.6 / P0.S5 / P0.S6 implemented in the Python app (2026-08-25). Remaining P0/P1/P2 boxes below are still open.  
+**Status:** P0.5 / P0.6 / P0.S5 / P0.S6 implemented in the Python app (2026-08-25). Companion dashboard phases 1–4 (chat, care, memory, alarm, settings, tabbed SPA) shipped 2026-09-01. Remaining P0/P1/P2 boxes below are still open except P2.2 / P2.5.  
 **Date:** 2026-08-25  
 **Repo:** this VPS tree (`phoe_lone_server`).  
 **Companion:** ESP32 work lives in `CLIENT_PRODUCTION_PLAN.md` on the PC firmware repo. This file never assigns C++ or GPIO tasks.  
@@ -45,6 +45,7 @@ Stack: FastAPI + Starlette WebSocket, Uvicorn, Caddy TLS, Postgres, Redis. MQTT 
 - `/health`, `/ready`, `/metrics`, Compose + Caddy.
 - Vision `POST /vision/explain` stub (`camera not available`).
 - Dummy firmware `GET /firmware/none.bin` → **404**.
+- Companion portal: cookie-gated SPA at `GET /` ([`dashboard.html`](app/templates/dashboard.html)), `wss://…/companion/v1/`, optional `COMPANION_PIN` unlock.
 
 ### 1.2 Gaps this plan owns
 
@@ -464,10 +465,10 @@ Firmware boxes are in `CLIENT_PRODUCTION_PLAN.md`. Do not mix.
 ### P2 — product
 
 - [ ] **P2.1** Optional `server_time` already sent; morning greeting is prompt + local clock — add prompt only if firmware sleep exists.
-- [ ] **P2.2** Postgres memory (name, likes) injected into Live `system_instruction` or a prefix turn.
+- [x] **P2.2** Postgres memory (name, likes) injected into Live `system_instruction`; care meters + achievements in the same companion store.
 - [ ] **P2.3** Board channel `phoe-lone`; HTTPS artifact URL; no dummy when `FIRMWARE_VERSION` set; checksum/logging.
 - [ ] **P2.4** If firmware enables AEC: accept hello `features.aec`, protocol v2 timestamps — **only then** change `ota_websocket_version` / binary framing. Default stay v1 until both sides ship together.
-- [ ] **P2.5** User-only MCP listing remains `withUserTools: false` for Gemini; companion API later.
+- [x] **P2.5** User-only MCP listing remains `withUserTools: false` for Gemini; companion dashboard + `/companion/v1/` hub is live (`settings.reboot` / `upgrade` use `withUserTools: true` on that path only). Second-browser unlock is still env `COMPANION_PIN` (not per-user accounts).
 - [ ] **P2.6** Optional crash ingest endpoint (auth); do not build until firmware posts dumps.
 - [ ] **P2.7** Glyph-push on `stt`/`sentence_start` if firmware advertises `features.glyph_push`.
 - [ ] **P2.10** Per-device Gemini/TTS rate limits beyond current WS limiter.
