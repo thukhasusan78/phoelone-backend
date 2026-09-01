@@ -68,7 +68,15 @@ from app.observability.metrics import (
     TURN_LATENCY,
     TURNS,
 )
-from app.protocol.messages import alert, keepalive, llm_emotion, server_hello, stt, tts
+from app.protocol.messages import (
+    abort_speaking,
+    alert,
+    keepalive,
+    llm_emotion,
+    server_hello,
+    stt,
+    tts,
+)
 from app.protocol.models import (
     KNOWN_EMOTIONS,
     AbortMessage,
@@ -348,6 +356,20 @@ class DeviceSession:
         """End the voice conversation; stay on /xiaozhi/v1/ in READY until the next wakeword."""
         self._awaiting_wake = True
         log.info("session.exit_requested", session_id=self.session_id)
+
+    async def _notify_device_idle(self) -> None:
+        """After farewell TTS, tell firmware to exit auto-listen and restore Idle."""
+        log.info("session.device_idle", session_id=self.session_id)
+        await self._put(
+            Outbound(
+                "json",
+                abort_speaking(self.session_id, "conversation_ended"),
+                _KEEPALIVE_GENERATION,
+            )
+        )
+        await self._set_emotion("staticstate")
+        await self._queue_json(llm_emotion(self.session_id, self._emotion), _KEEPALIVE_GENERATION)
+        self._schedule_presence_broadcast()
 
     def _is_farewell(self, text: str) -> bool:
         normalized = _normalize_farewell(text)
@@ -1055,6 +1077,8 @@ class DeviceSession:
                 generation == self.state.generation or self._awaiting_wake
             ):
                 self._set_state(SessionState.READY, force=True)
+            if self._awaiting_wake and not self._closed:
+                await self._notify_device_idle()
             await self._maybe_reconnect_owner_memory()
 
     async def _handle_tools(

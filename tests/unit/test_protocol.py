@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.protocol.messages import keepalive, llm_emotion, server_hello, tts
+from app.protocol.messages import abort_speaking, keepalive, llm_emotion, server_hello, tts
 from app.protocol.models import DeviceHello, ListenMessage, PongMessage
 
 
@@ -32,6 +32,19 @@ def test_server_hello_transport() -> None:
     body = server_hello("abc")
     assert '"transport":"websocket"' in body
     assert '"sample_rate":24000' in body
+
+
+def test_server_abort_speaking() -> None:
+    import json
+
+    body = json.loads(abort_speaking("abc", "conversation_ended"))
+    assert body == {
+        "session_id": "abc",
+        "type": "abort",
+        "reason": "conversation_ended",
+    }
+    bare = json.loads(abort_speaking("abc"))
+    assert bare == {"session_id": "abc", "type": "abort"}
 
 
 def test_tts_and_emotion() -> None:

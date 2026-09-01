@@ -344,6 +344,24 @@ def test_farewell_exits_after_tts_stop() -> None:
                 assert any(p.get("type") == "tts" and p.get("state") == "stop" for p in seen)
                 assert tts.spoken == ["ဘိုင်း"]
 
+                after_stop = []
+                for _ in range(10):
+                    message = ws.receive()
+                    if message["type"] == "websocket.send" and message.get("bytes"):
+                        continue
+                    text = message.get("text")
+                    if not text:
+                        continue
+                    payload = json.loads(text)
+                    if payload.get("type") == "ping":
+                        continue
+                    after_stop.append(payload)
+                    if payload.get("type") == "abort":
+                        break
+                assert any(p.get("type") == "abort" for p in after_stop)
+                abort_msg = next(p for p in after_stop if p.get("type") == "abort")
+                assert abort_msg.get("reason") == "conversation_ended"
+
                 import time
 
                 time.sleep(0.25)

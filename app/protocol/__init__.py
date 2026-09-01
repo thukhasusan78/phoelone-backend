@@ -1,4 +1,5 @@
 from app.protocol.messages import (
+    abort_speaking,
     alert,
     dumps,
     keepalive,
@@ -20,6 +21,7 @@ __all__ = [
     "PongMessage",
     "SessionState",
     "StateMachine",
+    "abort_speaking",
     "alert",
     "dumps",
     "keepalive",

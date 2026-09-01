@@ -35,6 +35,14 @@ def tts(session_id: str, state: str, text: str | None = None) -> str:
     return dumps(body)
 
 
+def abort_speaking(session_id: str, reason: str | None = None) -> str:
+    """Server → device: leave auto-listen and return to Idle (mic off, idle face)."""
+    body: dict[str, Any] = {"session_id": session_id, "type": "abort"}
+    if reason:
+        body["reason"] = reason
+    return dumps(body)
+
+
 def stt(session_id: str, text: str) -> str:
     return dumps({"session_id": session_id, "type": "stt", "text": text})
 
