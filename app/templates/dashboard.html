@@ -17,7 +17,11 @@
       --line: #243049;
     }
     * { box-sizing: border-box; }
-    html, body { margin: 0; min-height: 100%; }
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+    }
     body {
       font-family: ui-rounded, "Segoe UI", system-ui, -apple-system, sans-serif;
       background:
@@ -25,17 +29,29 @@
         radial-gradient(900px 500px at 110% 10%, #0ea5e933, transparent 50%),
         var(--bg);
       color: var(--ink);
-      padding: 20px 16px 32px;
+      min-height: 100dvh;
+      height: 100dvh;
     }
-    .wrap { width: min(720px, 100%); margin: 0 auto; display: grid; gap: 16px; }
+    .wrap.app-shell {
+      width: min(720px, 100%);
+      margin: 0 auto;
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      padding: 12px 16px 0;
+      gap: 12px;
+    }
     header {
+      flex-shrink: 0;
       background: color-mix(in srgb, var(--card) 92%, black);
       border: 1px solid var(--line);
       border-radius: 24px;
-      padding: 20px 20px 16px;
+      padding: 16px 18px 14px;
       box-shadow: 0 24px 80px #00000066;
     }
     .top { display: flex; align-items: center; gap: 12px; }
+    .top .title { flex: 1; min-width: 0; }
+    .header-stop { margin-left: auto; flex-shrink: 0; padding: 10px 16px; }
     .mark {
       width: 44px; height: 44px; border-radius: 14px;
       display: grid; place-items: center;
@@ -94,7 +110,6 @@
     .chat-log {
       display: grid;
       gap: 8px;
-      max-height: 260px;
       overflow-y: auto;
       margin: 0 0 12px;
       min-height: 4.5em;
@@ -259,17 +274,67 @@
       accent-color: var(--accent);
     }
     .meter em { font-style: normal; color: var(--ink); }
+    .tab-pages {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+    }
+    .tab-page { display: none; }
+    .tab-page.is-active { display: grid; gap: 16px; }
+    #tab-chat.is-active {
+      display: flex;
+      flex-direction: column;
+      min-height: 100%;
+    }
+    #tab-chat.is-active section {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    #tab-chat .chat-log { flex: 1; max-height: none; }
+    .tab-bar {
+      position: fixed;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: min(720px, 100%);
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 4px;
+      background: color-mix(in srgb, var(--card) 96%, black);
+      border-top: 1px solid var(--line);
+      padding: 6px 8px calc(8px + env(safe-area-inset-bottom, 0px));
+      z-index: 20;
+    }
+    .tab-bar button {
+      background: transparent;
+      color: var(--muted);
+      border: 0;
+      border-radius: 14px;
+      padding: 10px 4px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      box-shadow: none;
+    }
+    .tab-bar button.is-active {
+      color: var(--accent);
+      background: #38bdf814;
+    }
   </style>
 </head>
 <body>
-  <div class="wrap">
+  <div class="wrap app-shell">
     <header>
       <div class="top">
         <div class="mark">M</div>
-        <div>
+        <div class="title">
           <h1>Mickey</h1>
           <div class="sub" id="link-state">Connecting…</div>
         </div>
+        <button class="stop header-stop" id="btn-stop" type="button">Stop</button>
       </div>
       <div class="stats">
         <span class="pill off" id="online-pill">Offline</span>
@@ -280,123 +345,133 @@
       <div class="banner err" id="error-banner"></div>
     </header>
 
-    <section>
-      <h2>Care</h2>
-      <div class="meters">
-        <div class="meter"><span>Happiness</span><progress id="meter-happy" max="100" value="55"></progress></div>
-        <div class="meter"><span>Energy</span><progress id="meter-energy" max="100" value="70"></progress></div>
-        <div class="meter"><span>Bond</span><progress id="meter-bond" max="100" value="30"></progress></div>
-      </div>
-      <p class="score" id="care-streak">Streak — 0 days</p>
-      <div class="row">
-        <button type="button" id="btn-pet">Pet</button>
-        <button class="ghost" type="button" id="btn-feed">Snack</button>
-      </div>
-      <div class="badges" id="badges"></div>
-    </section>
+    <div class="tab-pages">
+      <div id="tab-home" class="tab-page is-active">
+        <section>
+          <h2>Care</h2>
+          <div class="meters">
+            <div class="meter"><span>Happiness</span><progress id="meter-happy" max="100" value="55"></progress></div>
+            <div class="meter"><span>Energy</span><progress id="meter-energy" max="100" value="70"></progress></div>
+            <div class="meter"><span>Bond</span><progress id="meter-bond" max="100" value="30"></progress></div>
+          </div>
+          <p class="score" id="care-streak">Streak — 0 days</p>
+          <div class="row">
+            <button type="button" id="btn-pet">Pet</button>
+            <button class="ghost" type="button" id="btn-feed">Snack</button>
+          </div>
+          <div class="badges" id="badges"></div>
+        </section>
 
-    <section>
-      <h2>Alarm</h2>
-      <p class="score" id="alarm-status">No alarm set</p>
-      <div class="row" style="margin-bottom: 10px">
-        <input id="alarm-time" type="time" value="07:00">
-        <label class="tog"><input type="checkbox" id="alarm-repeat" checked> Daily</label>
+        <section>
+          <h2>Alarm</h2>
+          <p class="score" id="alarm-status">No alarm set</p>
+          <div class="row" style="margin-bottom: 10px">
+            <input id="alarm-time" type="time" value="07:00">
+            <label class="tog"><input type="checkbox" id="alarm-repeat" checked> Daily</label>
+          </div>
+          <div class="row">
+            <button type="button" id="btn-alarm-save" class="needs-mickey">Save alarm</button>
+            <button type="button" id="btn-sleep" class="needs-mickey">Sleep now</button>
+            <button class="ghost needs-mickey" type="button" id="btn-alarm-cancel">Cancel alarm</button>
+          </div>
+        </section>
       </div>
-      <div class="row">
-        <button type="button" id="btn-alarm-save" class="needs-mickey">Save alarm</button>
-        <button type="button" id="btn-sleep" class="needs-mickey">Sleep now</button>
-        <button class="ghost needs-mickey" type="button" id="btn-alarm-cancel">Cancel alarm</button>
+
+      <div id="tab-play" class="tab-page">
+        <section>
+          <h2>Dance pad</h2>
+          <div class="grid" id="dance-pad"></div>
+        </section>
+
+        <section>
+          <h2>Rock · Paper · Scissors</h2>
+          <p class="score" id="rps-score">Best of 3 — you 0 · Mickey 0</p>
+          <div class="rps-arena" id="rps-arena">
+            <div class="rps-hand" id="rps-you-hand">
+              <div class="rps-emoji" id="rps-you-emoji">❔</div>
+              <div class="tag">You</div>
+            </div>
+            <div class="rps-vs" id="rps-vs">VS</div>
+            <div class="rps-hand" id="rps-mickey-hand">
+              <div class="rps-emoji" id="rps-mickey-emoji">❔</div>
+              <div class="tag">Mickey</div>
+            </div>
+          </div>
+          <div class="rps-chant" id="rps-chant" hidden>
+            <span data-beat="0">Rock</span>
+            <span data-beat="1">Paper</span>
+            <span data-beat="2">Scissors</span>
+          </div>
+          <p class="reveal" id="rps-reveal">Tap New match. Mickey chants first — throw with him.</p>
+          <div class="row" style="margin-bottom: 10px">
+            <button type="button" data-throw="rock">Rock</button>
+            <button type="button" data-throw="paper">Paper</button>
+            <button type="button" data-throw="scissors">Scissors</button>
+            <button type="button" id="btn-play">Play round</button>
+            <button class="ghost" type="button" id="btn-new">New match</button>
+          </div>
+        </section>
       </div>
-    </section>
 
-    <section>
-      <h2>Quick</h2>
-      <div class="row">
-        <button class="stop" id="btn-stop" type="button">Stop</button>
+      <div id="tab-chat" class="tab-page">
+        <section>
+          <h2>Chat</h2>
+          <div class="chat-log" id="chat-log"></div>
+          <form class="chat-form" id="chat-form">
+            <input id="chat-input" type="text" maxlength="400" autocomplete="off" placeholder="Say something to Mickey…">
+            <button type="submit" id="chat-send">Send</button>
+          </form>
+        </section>
       </div>
-    </section>
 
-    <section>
-      <h2>Chat</h2>
-      <div class="chat-log" id="chat-log"></div>
-      <form class="chat-form" id="chat-form">
-        <input id="chat-input" type="text" maxlength="400" autocomplete="off" placeholder="Say something to Mickey…">
-        <button type="submit" id="chat-send">Send</button>
-      </form>
-    </section>
+      <div id="tab-settings" class="tab-page">
+        <section>
+          <h2>Mickey knows me</h2>
+          <form class="memory-form" id="memory-form">
+            <input id="mem-name" type="text" maxlength="48" autocomplete="name" placeholder="Your name">
+            <input id="mem-nick" type="text" maxlength="48" placeholder="What you call Mickey">
+            <input id="mem-likes" type="text" maxlength="160" placeholder="Things you like">
+            <button type="submit" id="mem-save">Save</button>
+          </form>
+        </section>
 
-    <section>
-      <h2>Dance pad</h2>
-      <div class="grid" id="dance-pad"></div>
-    </section>
+        <section>
+          <h2>Settings</h2>
+          <div class="meters">
+            <div class="meter"><span>Volume <em id="vol-label">70</em></span><input id="set-volume" class="needs-mickey" type="range" min="0" max="100" value="70"></div>
+            <div class="meter"><span>Brightness <em id="bri-label">80</em></span><input id="set-brightness" class="needs-mickey" type="range" min="0" max="100" value="80"></div>
+          </div>
+          <div class="row" style="margin-bottom: 10px">
+            <button class="ghost needs-mickey" type="button" id="theme-dark">Dark face</button>
+            <button class="ghost needs-mickey" type="button" id="theme-light">Light face</button>
+          </div>
+          <p class="score" id="fw-version">Firmware —</p>
+          <div class="meters" id="trim-meters">
+            <div class="meter"><span>Left leg <em id="trim-left_leg-label">0</em></span><input id="trim-left_leg" class="needs-mickey" type="range" min="-50" max="50" value="0"></div>
+            <div class="meter"><span>Right leg <em id="trim-right_leg-label">0</em></span><input id="trim-right_leg" class="needs-mickey" type="range" min="-50" max="50" value="0"></div>
+            <div class="meter"><span>Left foot <em id="trim-left_foot-label">0</em></span><input id="trim-left_foot" class="needs-mickey" type="range" min="-50" max="50" value="0"></div>
+            <div class="meter"><span>Right foot <em id="trim-right_foot-label">0</em></span><input id="trim-right_foot" class="needs-mickey" type="range" min="-50" max="50" value="0"></div>
+          </div>
+          <div class="row">
+            <button class="ghost needs-mickey" type="button" id="btn-reboot">Reboot</button>
+            <button class="stop needs-mickey" type="button" id="btn-upgrade">Install update</button>
+          </div>
+        </section>
 
-    <section>
-      <h2>Rock · Paper · Scissors</h2>
-      <p class="score" id="rps-score">Best of 3 — you 0 · Mickey 0</p>
-      <div class="rps-arena" id="rps-arena">
-        <div class="rps-hand" id="rps-you-hand">
-          <div class="rps-emoji" id="rps-you-emoji">❔</div>
-          <div class="tag">You</div>
+        <div class="foot">
+          <form method="post" action="/companion/logout">
+            <button type="submit">Log out</button>
+          </form>
         </div>
-        <div class="rps-vs" id="rps-vs">VS</div>
-        <div class="rps-hand" id="rps-mickey-hand">
-          <div class="rps-emoji" id="rps-mickey-emoji">❔</div>
-          <div class="tag">Mickey</div>
-        </div>
       </div>
-      <div class="rps-chant" id="rps-chant" hidden>
-        <span data-beat="0">Rock</span>
-        <span data-beat="1">Paper</span>
-        <span data-beat="2">Scissors</span>
-      </div>
-      <p class="reveal" id="rps-reveal">Tap New match. Mickey chants first — throw with him.</p>
-      <div class="row" style="margin-bottom: 10px">
-        <button type="button" data-throw="rock">Rock</button>
-        <button type="button" data-throw="paper">Paper</button>
-        <button type="button" data-throw="scissors">Scissors</button>
-        <button type="button" id="btn-play">Play round</button>
-        <button class="ghost" type="button" id="btn-new">New match</button>
-      </div>
-    </section>
-
-    <section>
-      <h2>Mickey knows me</h2>
-      <form class="memory-form" id="memory-form">
-        <input id="mem-name" type="text" maxlength="48" autocomplete="name" placeholder="Your name">
-        <input id="mem-nick" type="text" maxlength="48" placeholder="What you call Mickey">
-        <input id="mem-likes" type="text" maxlength="160" placeholder="Things you like">
-        <button type="submit" id="mem-save">Save</button>
-      </form>
-    </section>
-
-    <section>
-      <h2>Settings</h2>
-      <div class="meters">
-        <div class="meter"><span>Volume <em id="vol-label">70</em></span><input id="set-volume" class="needs-mickey" type="range" min="0" max="100" value="70"></div>
-        <div class="meter"><span>Brightness <em id="bri-label">80</em></span><input id="set-brightness" class="needs-mickey" type="range" min="0" max="100" value="80"></div>
-      </div>
-      <div class="row" style="margin-bottom: 10px">
-        <button class="ghost needs-mickey" type="button" id="theme-dark">Dark face</button>
-        <button class="ghost needs-mickey" type="button" id="theme-light">Light face</button>
-      </div>
-      <p class="score" id="fw-version">Firmware —</p>
-      <div class="meters" id="trim-meters">
-        <div class="meter"><span>Left leg <em id="trim-left_leg-label">0</em></span><input id="trim-left_leg" class="needs-mickey" type="range" min="-50" max="50" value="0"></div>
-        <div class="meter"><span>Right leg <em id="trim-right_leg-label">0</em></span><input id="trim-right_leg" class="needs-mickey" type="range" min="-50" max="50" value="0"></div>
-        <div class="meter"><span>Left foot <em id="trim-left_foot-label">0</em></span><input id="trim-left_foot" class="needs-mickey" type="range" min="-50" max="50" value="0"></div>
-        <div class="meter"><span>Right foot <em id="trim-right_foot-label">0</em></span><input id="trim-right_foot" class="needs-mickey" type="range" min="-50" max="50" value="0"></div>
-      </div>
-      <div class="row">
-        <button class="ghost needs-mickey" type="button" id="btn-reboot">Reboot</button>
-        <button class="stop needs-mickey" type="button" id="btn-upgrade">Install update</button>
-      </div>
-    </section>
-
-    <div class="foot">
-      <form method="post" action="/companion/logout">
-        <button type="submit">Log out</button>
-      </form>
     </div>
+
+    <nav class="tab-bar" role="tablist" aria-label="Companion sections">
+      <button type="button" role="tab" data-tab="home" class="is-active" aria-selected="true">Home</button>
+      <button type="button" role="tab" data-tab="play" aria-selected="false">Play</button>
+      <button type="button" role="tab" data-tab="chat" aria-selected="false">Chat</button>
+      <button type="button" role="tab" data-tab="settings" aria-selected="false">Settings</button>
+    </nav>
   </div>
   <script>
     const DANCES = [
@@ -948,6 +1023,32 @@
         send({ type: "settings.set", trims: trims });
       });
     });
+
+    const TABS = ["home", "play", "chat", "settings"];
+
+    function showTab(name) {
+      if (TABS.indexOf(name) === -1) name = "home";
+      document.querySelectorAll(".tab-page").forEach((el) => {
+        el.classList.toggle("is-active", el.id === "tab-" + name);
+      });
+      document.querySelectorAll(".tab-bar [data-tab]").forEach((btn) => {
+        const on = btn.dataset.tab === name;
+        btn.classList.toggle("is-active", on);
+        btn.setAttribute("aria-selected", on ? "true" : "false");
+      });
+      if (location.hash !== "#" + name) history.replaceState(null, "", "#" + name);
+    }
+
+    document.querySelector(".tab-bar").addEventListener("click", (event) => {
+      const btn = event.target.closest("[data-tab]");
+      if (!btn) return;
+      event.preventDefault();
+      showTab(btn.dataset.tab);
+    });
+    window.addEventListener("hashchange", () => {
+      showTab((location.hash || "#home").slice(1));
+    });
+    showTab((location.hash || "#home").slice(1));
 
     setControls();
     connect();
