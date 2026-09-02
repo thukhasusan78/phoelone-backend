@@ -194,6 +194,8 @@ class CompanionHub:
         msg_type = message.get("type")
         if msg_type == "command.dance":
             await self._dance(device_id, message, client_id)
+        elif msg_type == "command.emotion":
+            await self._emotion(device_id, message)
         elif msg_type == "command.stop":
             await self._stop(device_id)
         elif msg_type == "game.start":
@@ -234,6 +236,12 @@ class CompanionHub:
         await session.companion_action("dance", {"action": action})
         await self.credit(device_id, client_id, "dance")
         await self.unlock(device_id, client_id, "first_web_dance")
+        await self.push_presence(device_id)
+
+    async def _emotion(self, device_id: str, message: dict[str, Any]) -> None:
+        emotion = str(message.get("emotion") or "")
+        session = self._require_session(device_id)
+        await session.companion_action("emotion", {"emotion": emotion})
         await self.push_presence(device_id)
 
     def _cancel_game(self, key: str) -> None:

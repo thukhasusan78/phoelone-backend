@@ -79,12 +79,12 @@ from app.protocol.messages import (
     tts,
 )
 from app.protocol.models import (
-    KNOWN_EMOTIONS,
     AbortMessage,
     DeviceHello,
     ListenMessage,
     McpEnvelope,
     PongMessage,
+    canonical_emotion,
 )
 from app.protocol.state import SessionState, StateMachine
 from app.tools.http import HttpGuardError, assert_public_https
@@ -275,7 +275,8 @@ class DeviceSession:
         self._swallow_auto_listen = False
         self._ignored_auto_listen = False
         self._live_stale = False
-        self._emotion = "happy"
+        self._emotion = "staticstate"
+        self._emotion_pushed: str | None = None
         self._listen_mode = "auto"
         self._pcm_started = False
         self._forwarded_seconds = 0.0
@@ -377,8 +378,7 @@ class DeviceSession:
                 _KEEPALIVE_GENERATION,
             )
         )
-        await self._set_emotion("staticstate")
-        await self._queue_json(llm_emotion(self.session_id, self._emotion), _KEEPALIVE_GENERATION)
+        await self._set_emotion("staticstate", generation=_KEEPALIVE_GENERATION)
         self._schedule_presence_broadcast()
         # If auto listen/start already arrived during farewell TTS, do not also
         # swallow the next wake. Otherwise swallow one late auto-continue.
@@ -738,7 +738,8 @@ class DeviceSession:
         self._awaiting_tts_stop = False
         # Reuse Silero LSTM across listens — a new scorer is cold for ~1s.
         self._gate.reset(reset_scorer=False)
-        self._emotion = "happy"
+        self._emotion = "staticstate"
+        self._emotion_pushed = None
         self._brain_ready = False
         self._pcm_hold.clear()
         self._last_gate_key = None
@@ -1275,8 +1276,22 @@ class DeviceSession:
             log.info("session.otto_status_failed", session_id=self.session_id, error=str(exc))
             return False
 
-    async def _set_emotion(self, emotion: str) -> None:
-        self._emotion = emotion if emotion in KNOWN_EMOTIONS else "neutral"
+    async def _set_emotion(
+        self, emotion: str, *, push: bool = True, generation: int | None = None
+    ) -> None:
+        """Store the canonical face and optionally push type: llm now.
+
+        Push on set_emotion so a short idle jitter can fire *before* TTS.
+        Skip a duplicate push of the same face so tts/start does not jitter twice.
+        Firmware must still freeze the body while Listening (VAD).
+        """
+        self._emotion = canonical_emotion(emotion)
+        if not push:
+            return
+        if self._emotion_pushed == self._emotion:
+            return
+        await self._queue_json(llm_emotion(self.session_id, self._emotion), generation)
+        self._emotion_pushed = self._emotion
 
     @property
     def closed(self) -> bool:
@@ -1545,6 +1560,8 @@ class DeviceSession:
                 return await self._companion_stop()
             if kind == "dance":
                 return await self._companion_dance(payload)
+            if kind == "emotion":
+                return await self._companion_emotion(payload)
             async with self._companion_lock:
                 if kind == "rps_react":
                     return await self._companion_rps_react(payload)
@@ -1577,7 +1594,16 @@ class DeviceSession:
 
     async def _apply_emotion(self, emotion: str) -> None:
         await self._set_emotion(emotion)
-        await self._queue_json(llm_emotion(self.session_id, self._emotion))
+
+    async def _companion_emotion(self, args: dict[str, Any]) -> dict[str, Any]:
+        raw = str(args.get("emotion") or "").strip()
+        if not raw:
+            raise CompanionError("invalid", "Pick a face first.")
+        face = canonical_emotion(raw)
+        if face == "neutral" and raw not in {"neutral", ""}:
+            raise CompanionError("invalid", "Unknown face.")
+        await self._apply_emotion(face)
+        return {"ok": True, "emotion": self._emotion}
 
     async def _companion_stop(self) -> dict[str, Any]:
         try:
@@ -1586,11 +1612,17 @@ class DeviceSession:
             log.info("companion.stop_mcp_failed", session_id=self.session_id, error=str(exc))
         if self.state.state in {SessionState.THINKING, SessionState.SPEAKING}:
             await self._abort(reason="companion_stop")
+        await self._set_emotion("staticstate")
         return {"ok": True}
 
     async def _companion_dance(self, args: dict[str, Any]) -> dict[str, Any]:
-        if self.state.state == SessionState.THINKING:
-            raise CompanionError("busy", "Mickey is thinking.")
+        if self.state.state in {SessionState.THINKING, SessionState.LISTENING}:
+            raise CompanionError(
+                "busy",
+                "Mickey is listening."
+                if self.state.state == SessionState.LISTENING
+                else "Mickey is thinking.",
+            )
         action = str(args.get("action") or "")
         motion = dance_payload(action)
         if self._motion_inhibited():
@@ -1955,7 +1987,7 @@ class DeviceSession:
                     already_started = self._awaiting_tts_stop
                     self._awaiting_tts_stop = False
                     self._set_state(SessionState.SPEAKING, force=True)
-                    await self._queue_json(llm_emotion(self.session_id, self._emotion), generation)
+                    await self._set_emotion(self._emotion, generation=generation)
                     if not already_started:
                         await self._queue_json(tts(self.session_id, "start"), generation)
                     started = True
@@ -1985,7 +2017,7 @@ class DeviceSession:
                     return
                 await self._queue_json(tts(self.session_id, "stop"), generation)
 
-    async def _speak(self, text: str, generation: int, emotion: str = "happy") -> None:
+    async def _speak(self, text: str, generation: int, emotion: str = "staticstate") -> None:
         if generation != self.state.generation:
             return
         text = sanitize_for_tts(text)
@@ -2004,7 +2036,7 @@ class DeviceSession:
         already_started = self._awaiting_tts_stop
         self._awaiting_tts_stop = False
         self._set_state(SessionState.SPEAKING, force=True)
-        await self._queue_json(llm_emotion(self.session_id, emotion), generation)
+        await self._set_emotion(emotion, generation=generation)
         if not already_started:
             await self._queue_json(tts(self.session_id, "start"), generation)
 
@@ -2132,7 +2164,7 @@ class DeviceSession:
         already_started = self._awaiting_tts_stop or self.state.state == SessionState.SPEAKING
         self._awaiting_tts_stop = False
         self._set_state(SessionState.SPEAKING, force=True)
-        await self._queue_json(llm_emotion(self.session_id, "happy"), generation)
+        await self._set_emotion("happy", generation=generation)
         if not already_started:
             await self._queue_json(tts(self.session_id, "start"), generation)
         label = clip.track if not clip.artist else f"{clip.track} — {clip.artist}"

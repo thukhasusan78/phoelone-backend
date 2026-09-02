@@ -53,6 +53,8 @@ def test_activate_sets_cookie_and_opens_dashboard(app) -> None:
         dashboard = client.get("/")
         assert dashboard.status_code == 200
         assert "Dance pad" in dashboard.text
+        assert "face-pad" in dashboard.text
+        assert "command.emotion" in dashboard.text
         assert "Rock" in dashboard.text
         assert "rps-arena" in dashboard.text
         assert "rps-chant" in dashboard.text

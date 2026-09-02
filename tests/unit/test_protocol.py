@@ -51,6 +51,10 @@ def test_tts_and_emotion() -> None:
     assert '"state":"start"' in tts("s", "start")
     assert '"emotion":"neutral"' in llm_emotion("s", "unknown")
     assert '"emotion":"happy"' in llm_emotion("s", "happy")
+    assert '"emotion":"surprised"' in llm_emotion("s", "shocked")
+    assert '"emotion":"sad"' in llm_emotion("s", "crying")
+    assert '"emotion":"laughing"' in llm_emotion("s", "funny")
+    assert '"emotion":"angry"' in llm_emotion("s", "anger")
 
 
 def test_pong_parse() -> None:

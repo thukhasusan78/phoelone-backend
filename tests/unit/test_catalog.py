@@ -179,7 +179,9 @@ def test_dual_fleet_sensor_tools_prefer_mickey_names() -> None:
     imu = next(t for t in tools if t["name"] == "self.mickey.imu.get_reading")
     assert "wired:true" in imu["description"]
     light = next(t for t in tools if t["name"] == "self.mickey.light.get_level")
+    assert "wired:true" in light["description"]
     assert "wired:false" in light["description"]
+    assert "never invent" in light["description"].lower()
 
 
 def test_router_exposes_host_and_device_tools() -> None:
@@ -223,9 +225,11 @@ def test_sensor_catalog_is_dual_fleet() -> None:
     assert "wired:true" in imu
     assert "ok:false" in imu
     assert "wired:true" in touch
+    assert "wired:true" in light
     assert "wired:false" in light
     assert "never invent" in light.lower()
     assert "lux" in light
+    assert "bucket" in light
     assert "notification" in touch
     assert "self.otto.stop" in imu
     assert "wired:true" in SYSTEM_PROMPT
@@ -236,9 +240,15 @@ def test_sensor_catalog_is_dual_fleet() -> None:
     assert "do not walk" in SYSTEM_PROMPT.lower()
     assert "self.mickey." in SYSTEM_PROMPT
     assert "self.phoe_lone." in SYSTEM_PROMPT
-    assert "light is not connected" in SYSTEM_PROMPT.lower()
+    assert "never invent a lux" in SYSTEM_PROMPT.lower()
+    assert "set_emotion" in SYSTEM_PROMPT
+    assert "before speaking" in SYSTEM_PROMPT.lower()
+    assert "gently" in SYSTEM_PROMPT.lower()
+    assert "sway" in SYSTEM_PROMPT.lower()
+    assert "listening" in SYSTEM_PROMPT.lower()
     assert LLM_TOOLS["self.phoe_lone.imu.get_reading"]["description"] != imu
     assert "wired:true" in LLM_TOOLS["self.phoe_lone.imu.get_reading"]["description"]
+    assert "wired:true" in LLM_TOOLS["self.phoe_lone.light.get_level"]["description"]
     assert "wired:false" in LLM_TOOLS["self.phoe_lone.light.get_level"]["description"]
 
 

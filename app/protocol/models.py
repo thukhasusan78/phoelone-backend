@@ -88,3 +88,18 @@ KNOWN_EMOTIONS = frozenset(
         "speaking",
     }
 )
+
+# Slice 6 firmware table keys. GIF aliases stay in KNOWN_EMOTIONS so Gemini
+# may still name them; the wire uses the canonical face.
+EMOTION_ALIASES = {
+    "shocked": "surprised",
+    "crying": "sad",
+    "funny": "laughing",
+    "anger": "angry",
+}
+
+
+def canonical_emotion(emotion: str) -> str:
+    name = (emotion or "").strip()
+    mapped = EMOTION_ALIASES.get(name, name)
+    return mapped if mapped in KNOWN_EMOTIONS else "neutral"

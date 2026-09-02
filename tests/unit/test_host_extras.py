@@ -37,3 +37,4 @@ def test_expanded_emotions() -> None:
     assert "thinking" in KNOWN_EMOTIONS
     assert '"emotion":"thinking"' in llm_emotion("s", "thinking")
     assert '"emotion":"neutral"' in llm_emotion("s", "not-a-face")
+    assert '"emotion":"surprised"' in llm_emotion("s", "shocked")

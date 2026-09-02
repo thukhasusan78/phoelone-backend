@@ -56,7 +56,11 @@ HOST_DECLARATIONS = [
     },
     {
         "name": "set_emotion",
-        "description": "Set the robot face emotion for this reply.",
+        "description": (
+            "Set the robot face now (idle or this reply). Call as soon as you know "
+            "the mood, before speaking, so a short pre-speech jitter can fire. "
+            "Do not use otto.action for a smile — face is enough."
+        ),
         "parameters": {
             "type": "object",
             "properties": {

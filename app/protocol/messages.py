@@ -5,7 +5,7 @@ from typing import Any
 
 import orjson
 
-from app.protocol.models import KNOWN_EMOTIONS
+from app.protocol.models import canonical_emotion
 
 
 def dumps(payload: dict[str, Any]) -> str:
@@ -48,8 +48,7 @@ def stt(session_id: str, text: str) -> str:
 
 
 def llm_emotion(session_id: str, emotion: str, text: str | None = None) -> str:
-    if emotion not in KNOWN_EMOTIONS:
-        emotion = "neutral"
+    emotion = canonical_emotion(emotion)
     body: dict[str, Any] = {"session_id": session_id, "type": "llm", "emotion": emotion}
     if text:
         body["text"] = text

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -78,6 +79,18 @@ def _session() -> DeviceSession:
     return session
 
 
+def _json_out(session: DeviceSession) -> list[dict]:
+    items: list[dict] = []
+    while True:
+        try:
+            item = session.out_queue.get_nowait()
+        except asyncio.QueueEmpty:
+            break
+        if item is not None and item.kind == "json":
+            items.append(json.loads(item.payload))
+    return items
+
+
 @pytest.mark.asyncio
 async def test_companion_dance_and_stop() -> None:
     session = _session()
@@ -86,6 +99,54 @@ async def test_companion_dance_and_stop() -> None:
     assert session.mcp.calls[0][1]["action"] == "jump"
     await session.companion_action("stop", {})
     assert session.mcp.calls[-1][0] == "self.otto.stop"
+    frames = [p for p in _json_out(session) if p.get("type") == "llm"]
+    assert frames[-1]["emotion"] == "staticstate"
+
+
+@pytest.mark.asyncio
+async def test_companion_emotion_pushes_llm_without_otto() -> None:
+    session = _session()
+    assert session._emotion == "staticstate"
+    result = await session.companion_action("emotion", {"emotion": "happy"})
+    assert result == {"ok": True, "emotion": "happy"}
+    assert session.mcp.calls == []
+    frames = _json_out(session)
+    assert frames == [
+        {"session_id": session.session_id, "type": "llm", "emotion": "happy"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_companion_emotion_aliases_and_rejects_unknown() -> None:
+    session = _session()
+    await session.companion_action("emotion", {"emotion": "shocked"})
+    assert session._emotion == "surprised"
+    with pytest.raises(CompanionError) as exc:
+        await session.companion_action("emotion", {"emotion": "not-a-face"})
+    assert exc.value.code == "invalid"
+
+
+@pytest.mark.asyncio
+async def test_companion_emotion_does_not_double_push() -> None:
+    session = _session()
+    await session._set_emotion("happy")
+    await session._set_emotion("happy")
+    frames = [p for p in _json_out(session) if p.get("type") == "llm"]
+    assert len(frames) == 1
+    assert frames[0]["emotion"] == "happy"
+
+
+@pytest.mark.asyncio
+async def test_listen_resets_emotion_to_rest_face() -> None:
+    session = _session()
+    session._emotion = "happy"
+    session._emotion_pushed = "happy"
+    await session._on_listen(
+        ListenMessage(type="listen", session_id="s", state="start", mode="auto")
+    )
+    assert session._emotion == "staticstate"
+    assert session._emotion_pushed is None
+    assert _json_out(session) == []
 
 
 @pytest.mark.asyncio
@@ -104,6 +165,17 @@ async def test_companion_dance_busy_while_thinking() -> None:
     with pytest.raises(CompanionError) as exc:
         await session.companion_action("dance", {"action": "jump"})
     assert exc.value.code == "busy"
+
+
+@pytest.mark.asyncio
+async def test_companion_dance_busy_while_listening() -> None:
+    session = _session()
+    session.state.state = SessionState.LISTENING
+    with pytest.raises(CompanionError) as exc:
+        await session.companion_action("dance", {"action": "jump"})
+    assert exc.value.code == "busy"
+    assert "listening" in str(exc.value).lower()
+    assert session.mcp.calls == []
 
 
 @pytest.mark.asyncio

@@ -206,9 +206,10 @@ LLM_TOOLS: dict[str, dict[str, Any]] = {
     "self.phoe_lone.light.get_level": {
         "name": "self.phoe_lone.light.get_level",
         "description": (
-            "Read the light sensor. This Mickey SKU has no light sensor (wired:false). "
-            "Never invent a lux reading. If the user asks if it is dark or bright, say the "
-            "light sensor is not connected. Same stub as self.mickey.light.get_level."
+            "Read the light sensor. Live: {wired:true, lux, bucket (dark|dim|indoor|bright), "
+            "raw}. Analog may omit lux. Unplug or fail: {wired:true, ok:false} or "
+            "{wired:false}. Never invent a lux reading. If wired:false or ok:false, say the "
+            "sensor is not connected or failed. Same sensor as self.mickey.light.get_level."
         ),
         "inputSchema": _object({}),
     },
@@ -237,9 +238,10 @@ LLM_TOOLS: dict[str, dict[str, Any]] = {
     "self.mickey.light.get_level": {
         "name": "self.mickey.light.get_level",
         "description": (
-            "Read the light sensor. This Mickey SKU has no light sensor (wired:false). "
-            "Never invent a lux reading. If the user asks if it is dark or bright, say the "
-            "light sensor is not connected. Same stub as self.phoe_lone.light.get_level."
+            "Read the light sensor. Live: {wired:true, lux, bucket (dark|dim|indoor|bright), "
+            "raw}. Analog may omit lux. Unplug or fail: {wired:true, ok:false} or "
+            "{wired:false}. Never invent a lux reading. If wired:false or ok:false, say the "
+            "sensor is not connected or failed. Same sensor as self.phoe_lone.light.get_level."
         ),
         "inputSchema": _object({}),
     },

@@ -368,9 +368,19 @@ Slice 9  light sensor (only if the module is on the desk)
 
 Slice 9 waits on a pin photo. Do not invent GPIOs. Slices 6–8 need no new hardware. Stop after each slice and run that slice’s acceptance list.
 
-Live idle clips (refine in Slice 7; do not throw them away): face `winking` any time, `sleepy` after 60 s; body after 60 s = slow `swing` (amount 20, period 2800 ms) or reduced `walk` (amount 18, period 3200 ms). **No** tiptoe-swing / shake-leg / bend. Fidget IMU mask while a clip runs (+400 ms). Fidget **off** while listening or speaking. Incoming `type: llm` emotion yields the director for 30 s.
+Live idle clips (refine in Slice 7; do not throw them away): face `winking` any time, `sleepy` after 60 s; body after 60 s = slow `swing` (amount 20, period 2800 ms) or reduced `walk` (amount 18, period 3200 ms). **No** tiptoe-swing / shake-leg / bend. Fidget IMU mask while a clip runs (+400 ms). Idle-director **body** clips stay off while listening or speaking. Incoming `type: llm` emotion yields the director for 30 s.
 
 LCD CS on this SKU is strapped to GND (`display_cs_pin = NC`). **Never drive GPIO 12.**
+
+### Illusion of Life — firmware owns the servo map (Slices 6–9)
+
+The VPS does **not** pick fidgets, idle ticks, or rest-face. It only sends `{ "type": "llm", "emotion": "<name>" }` (before `tts/start`, and immediately on dashboard Face / Gemini `set_emotion`; aliases already canonicalized: `shocked`→`surprised`, `crying`→`sad`, `funny`→`laughing`, `anger`→`angry`). **Firmware completely owns** the emotion → body table in Slice 6, when each clip may run, and when servos must freeze. Do not invent a new JSON `type`. Do not ask Gemini to walk for a smile.
+
+Three physical rules (EMO-like). They apply for the whole of Slices 6–9 and **amend** safety item 5 below:
+
+1. **STRICT FREEZE while Listening** (`kDeviceStateListening`). **Zero** servo movement. Protect VAD. Face GIF may still change if an `llm` arrives. Cancel any in-flight jitter / micro-sway / idle clip immediately on entering Listening, wake word, or GPIO 0. Do not start MCP dance clips while Listening.
+2. **PRE-SPEECH JITTER.** The Slice 6 emotion → tiny-motion reaction (**&lt; 800 ms**, then home, except `sit`) must execute **immediately** on the incoming `type: llm` packet, in the Idle window **before** `tts/start`. Do not wait for TTS. Do not wait for a second packet. Fire once per `llm`. Skip if Listening, if `OttoIsBusy()` (user/dashboard MCP preempts), if motion-inhibited / pet afterglow / pickup pause. This is the smile jitter.
+3. **MICRO-SWAY while Speaking** (`kDeviceStateSpeaking`). Optional, **very slow**, **silent**, face-led sway only — not a walk, not a replay of the Slice 6 jitter, not idle-director amplitude. Bound well below idle clips (1–2° look **or** amount ≤ 8, period ≥ 3000 ms, or a single slow lean). Never block Opus. Cancel immediately on `tts/stop`, abort, wake, pet, pickup, fall, `self.otto.stop` / `action`. The moment the device returns to Listening, servos **stop**.
 
 ---
 
@@ -382,7 +392,7 @@ These override cleverness. Do not violate them.
 2. **Cap duration.** Any emotion-triggered motion **&lt; 800 ms**, then home (except `sit`, which may hold). Queue depth **1**. If Otto is already busy with user/dashboard MCP, **skip** the gesture.
 3. **Never block Opus.** Do not wait on servos from the audio / WS task. Gesture goes through the existing fidget/action queue (`OttoTryQueueFidget` / equivalent), same priority as idle clips.
 4. **Preempt immediately:** wake word, GPIO 0, pet, pickup, fall, `OpenAudioChannel`, `self.otto.action` / `servo_sequences` / `stop`, sleep. Emotion gestures yield to all of these.
-5. **Mic hot = body still.** No fidget and no emotion gesture while `kDeviceStateListening` or `kDeviceStateSpeaking`. Face GIF may still change.
+5. **Listening freeze / speaking micro-sway.** While `kDeviceStateListening`: **zero** servo movement (VAD). Face GIF may change. While `kDeviceStateSpeaking`: idle-director body clips stay **off**; optional face-led **micro-sway** from §11 Illusion of Life is allowed. Slice 6 `&lt; 800 ms` jitter is Idle / pre-`tts/start` only — do not replay it during TTS.
 6. **Fall is local.** `OttoStopAndHome()` **&lt; 200 ms** before any notify. Do not wait on the VPS. Keep the fidget IMU mask so self-motion does not false-fall; true freefall (`|a| < 0.25 g`) still homes.
 7. **Low battery.** No body fidget, no emotion walk/swing, no MCP dance. Home + `sleepy` + dim still allowed. `self.otto.stop` / `home` still work.
 8. **No cloud fidget.** Do not call Gemini / open a turn to pick a blink. Do not auto-dance to music unless MCP asked.
@@ -415,11 +425,15 @@ Rules:
 - Skip if not `kDeviceStateIdle`, if `OttoIsBusy()`, if `OttoMotionInhibited()`, if pet afterglow / pickup pause is active.
 - After the gesture, keep the 30 s yield so idle clips do not immediately overwrite the face.
 - Do **not** start a cloud turn. Do **not** walk on every smile.
+- **Timing (do not wait):** run this table as soon as `type: llm` is parsed. Firmware is still Idle until `tts/start`; that is the pre-speech jitter window. See §11 Illusion of Life.
+- During `kDeviceStateSpeaking`, do **not** re-run this table. Optional face-led micro-sway is a **separate**, slower, silent clip (firmware-owned). Listening remains a strict freeze.
 
 ### Acceptance (Slice 6)
 
 - [ ] Dashboard or voice sets emotion `happy` while idle-connected: tiny jitter or sway &lt; 800 ms, then still; audio uninterrupted.
+- [ ] Jitter starts on the `type: llm` packet itself (Idle, **before** `tts/start`), not after speech begins.
 - [ ] Same test while **listening**: face may change; **no** servo motion.
+- [ ] While **speaking** (TTS playing): optional very slow silent face-led micro-sway only — not a walk, not a second jitter.
 - [ ] Emotion `sad`: sit or still; robot does not tip; no walk.
 - [ ] Emotion `angry`: face only.
 - [ ] Wake word during the tiny gesture cancels it immediately.
@@ -439,7 +453,7 @@ Changes:
 1. **Face variety before body.** Weighted face-only pool while `idle_ms < 60000`: add `loving` (and keep `winking`). Do not add body to this pool. After 60 s, keep current `sleepy` / slow sway / slow step.
 2. **Reset the 60 s body gate after real interaction.** Already resets on pet, pickup, and non-fidget Otto busy. Also reset when leaving `Listening`/`Speaking` back to `Idle` (chat or dashboard dance just finished) so he does **not** immediately shuffle. A 10–20 s face-only pause after a conversation is better than an instant walk.
 3. **Time of day (if `has_server_time_`).** After ~22:00 local: prefer `sleepy` face, skip body clips, optionally dim backlight one step. Morning (after alarm `QueueMorningWake` or hour ≥ 7): prefer `winking` / `happy` face, allow body clips as today. If server time is unknown, keep the current 60 s behavior.
-4. **Keep fidget off while listening/speaking.** Already true — do not regress.
+4. **Keep idle-director body clips off while listening/speaking.** Listening = **strict freeze** (do not regress). Speaking may run the §11 face-led **micro-sway** only — not idle walk/swing.
 5. **Do not ask Gemini to pick a fidget.** Already true — do not regress.
 
 Do **not** widen body amplitude. Do **not** add moonwalk / jump / showcase to idle.
@@ -529,7 +543,7 @@ Do **not** re-apply `firmware/otto-robot/patches/001–003` unless a rebase lost
 ## 19. Extra smoke after Slices 6–9
 
 1. Hello within 10 s of Wi-Fi (no wake word — always-on WS).
-2. After Slice 6: `happy` llm gesture &lt; 800 ms in idle; **no** gesture while listening.
+2. After Slice 6: `happy` `llm` gesture &lt; 800 ms **on the packet**, before `tts/start`; **zero** servos while listening; optional slow silent micro-sway only while TTS is playing.
 3. After Slice 7: one minute of face-only, then slow sway; no tip.
 4. After Slice 8: idle rest face is `staticstate` after Stop / TTS end.
 5. Pet 800 ms: happy face + tiny jitter with WS closed.

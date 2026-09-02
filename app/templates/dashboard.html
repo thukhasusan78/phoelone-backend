@@ -664,6 +664,12 @@
 
       <div id="tab-play" class="tab-page">
         <section>
+          <h2><span class="sec-ico" aria-hidden="true">😊</span>Face</h2>
+          <p class="score">Sets the face only — no speech. Tiny body motion may follow when he is idle, not while listening.</p>
+          <div class="grid" id="face-pad"></div>
+        </section>
+
+        <section>
           <h2><span class="sec-ico" aria-hidden="true">💃</span>Dance pad</h2>
           <div class="grid" id="dance-pad"></div>
         </section>
@@ -1006,6 +1012,27 @@
     </nav>
   </div>
   <script>
+    const FACES = [
+      ["happy", "Happy", "😊"],
+      ["laughing", "Laugh", "😂"],
+      ["loving", "Love", "😍"],
+      ["sad", "Sad", "😢"],
+      ["sleepy", "Sleepy", "😴"],
+      ["surprised", "Surprise", "😲"],
+      ["angry", "Angry", "😠"],
+      ["thinking", "Think", "🤔"],
+      ["confused", "Huh", "😕"],
+      ["staticstate", "Rest", "😐"],
+    ];
+    const facePad = document.getElementById("face-pad");
+    FACES.forEach(([emotion, label, icon]) => {
+      const btn = document.createElement("button");
+      btn.className = "ghost dance-tile";
+      btn.type = "button";
+      btn.dataset.emotion = emotion;
+      btn.innerHTML = "<span class=\"ico\" aria-hidden=\"true\">" + icon + "</span>" + label;
+      facePad.appendChild(btn);
+    });
     const DANCES = [
       ["walk", "Walk", "🚶"],
       ["jump", "Jump", "🦘"],
@@ -1047,6 +1074,7 @@
     const tttCells = [...document.querySelectorAll(".ttt-cell")];
     const tttStatus = document.getElementById("ttt-status");
     const danceButtons = [...document.querySelectorAll("[data-dance]")];
+    const faceButtons = [...document.querySelectorAll("[data-emotion]")];
     const chatLog = document.getElementById("chat-log");
     const chatForm = document.getElementById("chat-form");
     const chatInput = document.getElementById("chat-input");
@@ -1093,8 +1121,10 @@
       const matchOver = rpsPhase === "match_over";
       const thinking = deviceState === "thinking";
       const speaking = deviceState === "speaking";
+      const listening = deviceState === "listening";
       const playable = online && !sleeping;
-      danceButtons.forEach((btn) => { btn.disabled = !playable || thinking; });
+      danceButtons.forEach((btn) => { btn.disabled = !playable || thinking || listening; });
+      faceButtons.forEach((btn) => { btn.disabled = !playable; });
       throwButtons.forEach((btn) => { btn.disabled = !playable || !counting; });
       tttCells.forEach((btn) => { btn.disabled = !playable || tttPhase !== "your_turn"; });
       const playBtn = document.getElementById("btn-play");
@@ -1552,6 +1582,9 @@
     });
     danceButtons.forEach((btn) => {
       btn.addEventListener("click", () => send({ type: "command.dance", action: btn.dataset.dance }));
+    });
+    faceButtons.forEach((btn) => {
+      btn.addEventListener("click", () => send({ type: "command.emotion", emotion: btn.dataset.emotion }));
     });
     throwButtons.forEach((btn) => {
       btn.addEventListener("click", () => {
