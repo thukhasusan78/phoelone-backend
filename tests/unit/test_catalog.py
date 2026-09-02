@@ -7,6 +7,7 @@ from app.ai.tool_router import HOST_DECLARATIONS, ToolRouter
 from app.config import Settings
 from app.mcp.catalog import (
     LLM_TOOLS,
+    MICKEY_SENSOR_TOOLS,
     PHOE_LONE_FALLBACK_NAMES,
     PHOE_LONE_SENSOR_TOOLS,
     USER_ONLY_TOOLS,
@@ -39,7 +40,7 @@ REQUIRED_DEVICE_TOOLS = {
     "self.mickey.sleep.now",
 }
 
-SENSOR_DEVICE_TOOLS = set(PHOE_LONE_SENSOR_TOOLS)
+SENSOR_DEVICE_TOOLS = set(PHOE_LONE_SENSOR_TOOLS) | set(MICKEY_SENSOR_TOOLS)
 
 
 def test_system_prompt_is_english() -> None:
@@ -133,6 +134,54 @@ def test_discovered_sensor_tools_are_enriched() -> None:
     assert "错误" not in imu["description"]
 
 
+def test_dual_fleet_sensor_tools_prefer_mickey_names() -> None:
+    tools = enrich_discovered_tools(
+        [
+            {
+                "name": "self.phoe_lone.imu.get_reading",
+                "description": "imu",
+                "inputSchema": {"type": "object", "properties": {}},
+            },
+            {
+                "name": "self.mickey.imu.get_reading",
+                "description": "imu",
+                "inputSchema": {"type": "object", "properties": {}},
+            },
+            {
+                "name": "self.phoe_lone.touch.get_state",
+                "description": "touch",
+                "inputSchema": {"type": "object", "properties": {}},
+            },
+            {
+                "name": "self.mickey.touch.get_state",
+                "description": "touch",
+                "inputSchema": {"type": "object", "properties": {}},
+            },
+            {
+                "name": "self.phoe_lone.light.get_level",
+                "description": "light",
+                "inputSchema": {"type": "object", "properties": {}},
+            },
+            {
+                "name": "self.mickey.light.get_level",
+                "description": "light",
+                "inputSchema": {"type": "object", "properties": {}},
+            },
+        ]
+    )
+    names = {t["name"] for t in tools}
+    assert "self.mickey.imu.get_reading" in names
+    assert "self.mickey.touch.get_state" in names
+    assert "self.mickey.light.get_level" in names
+    assert "self.phoe_lone.imu.get_reading" not in names
+    assert "self.phoe_lone.touch.get_state" not in names
+    assert "self.phoe_lone.light.get_level" not in names
+    imu = next(t for t in tools if t["name"] == "self.mickey.imu.get_reading")
+    assert "wired:true" in imu["description"]
+    light = next(t for t in tools if t["name"] == "self.mickey.light.get_level")
+    assert "wired:false" in light["description"]
+
+
 def test_router_exposes_host_and_device_tools() -> None:
     settings = Settings(database_url="memory://")
     http = object()
@@ -166,21 +215,31 @@ def test_router_exposes_host_and_device_tools() -> None:
 
 
 def test_sensor_catalog_is_dual_fleet() -> None:
-    imu = LLM_TOOLS["self.phoe_lone.imu.get_reading"]["description"]
-    light = LLM_TOOLS["self.phoe_lone.light.get_level"]["description"]
-    touch = LLM_TOOLS["self.phoe_lone.touch.get_state"]["description"]
-    for text in (imu, light, touch, SYSTEM_PROMPT):
-        assert "wired:true" in text
-        assert "wired:false" in text
-        assert "unwired stubs" not in text
-    assert "never invent" in imu.lower() or "Never invent" in imu
+    imu = LLM_TOOLS["self.mickey.imu.get_reading"]["description"]
+    light = LLM_TOOLS["self.mickey.light.get_level"]["description"]
+    touch = LLM_TOOLS["self.mickey.touch.get_state"]["description"]
+    for name in MICKEY_SENSOR_TOOLS + PHOE_LONE_SENSOR_TOOLS:
+        assert name in LLM_TOOLS
+    assert "wired:true" in imu
+    assert "ok:false" in imu
+    assert "wired:true" in touch
+    assert "wired:false" in light
+    assert "never invent" in light.lower()
     assert "lux" in light
     assert "notification" in touch
     assert "self.otto.stop" in imu
-    assert "do not walk" in imu.lower() or "do not walk" in SYSTEM_PROMPT.lower()
+    assert "wired:true" in SYSTEM_PROMPT
+    assert "wired:false" in SYSTEM_PROMPT
     assert "unwired stubs" not in SYSTEM_PROMPT
     assert "ok:false" in SYSTEM_PROMPT
     assert "fall" in SYSTEM_PROMPT.lower()
+    assert "do not walk" in SYSTEM_PROMPT.lower()
+    assert "self.mickey." in SYSTEM_PROMPT
+    assert "self.phoe_lone." in SYSTEM_PROMPT
+    assert "light is not connected" in SYSTEM_PROMPT.lower()
+    assert LLM_TOOLS["self.phoe_lone.imu.get_reading"]["description"] != imu
+    assert "wired:true" in LLM_TOOLS["self.phoe_lone.imu.get_reading"]["description"]
+    assert "wired:false" in LLM_TOOLS["self.phoe_lone.light.get_level"]["description"]
 
 
 def test_mickey_alarm_catalog_and_prompt() -> None:

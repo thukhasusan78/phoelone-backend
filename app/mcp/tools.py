@@ -6,6 +6,7 @@ from app.mcp.catalog import (
     LLM_TOOLS,
     MICKEY_DEVICE_TOOLS,
     PHOE_LONE_FALLBACK_NAMES,
+    SENSOR_ALIAS_PAIRS,
     USER_ONLY_TOOLS,
     catalog_entry,
     is_forbidden,
@@ -83,11 +84,26 @@ def _merge_catalog(tool: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _drop_legacy_sensor_aliases(
+    enriched: list[dict[str, Any]], seen: set[str]
+) -> list[dict[str, Any]]:
+    """Prefer self.mickey.* sensor names when firmware listed both families."""
+    drop = {
+        legacy
+        for preferred, legacy in SENSOR_ALIAS_PAIRS
+        if preferred in seen and legacy in seen
+    }
+    if not drop:
+        return enriched
+    return [tool for tool in enriched if tool["name"] not in drop]
+
+
 def enrich_discovered_tools(discovered: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """English-enrich LLM-visible device tools.
 
     Empty discovery falls back to core Otto/Mickey tools only. Sensor tools
-    (``self.phoe_lone.*``) are never injected unless ``tools/list`` returned them.
+    (``self.mickey.*`` / ``self.phoe_lone.*``) are never injected unless
+    ``tools/list`` returned them. Dual-fleet lists keep the Mickey names.
     """
     visible = [t for t in discovered if t.get("name") and not is_user_only(t)]
     by_name = {t["name"]: t for t in visible}
@@ -112,4 +128,4 @@ def enrich_discovered_tools(discovered: list[dict[str, Any]]) -> list[dict[str, 
         if name not in seen and name in LLM_TOOLS:
             enriched.append(_merge_catalog({"name": name, **LLM_TOOLS[name]}))
             seen.add(name)
-    return enriched
+    return _drop_legacy_sensor_aliases(enriched, seen)

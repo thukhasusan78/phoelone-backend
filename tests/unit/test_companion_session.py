@@ -191,6 +191,29 @@ async def test_companion_chat_speaks_reply() -> None:
 
 
 @pytest.mark.asyncio
+async def test_companion_chat_bye_sends_idle_abort() -> None:
+    session = _session()
+    brain = FakeBrain(output_text="သွားတော့မယ်နော်။")
+    session.brain = brain
+    sent: list[str] = []
+
+    async def capture_put(item):
+        if item is not None and getattr(item, "kind", None) == "json":
+            sent.append(str(item.payload))
+
+    async def _skip_stream(*_a, **_k):
+        return None
+
+    session._put = capture_put
+    session._stream_sentence = _skip_stream
+    await session.companion_action("chat", {"text": "bye bye"})
+    assert any("conversation_ended" in payload for payload in sent)
+    assert any('"type":"abort"' in payload for payload in sent)
+    assert session._awaiting_wake is False
+    assert session.state.state == SessionState.READY
+
+
+@pytest.mark.asyncio
 async def test_companion_chat_busy_while_speaking() -> None:
     session = _session()
     session.brain = FakeBrain()

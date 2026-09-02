@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import random
+
 import pytest
 
 from app.companion.games.ttt import (
@@ -7,6 +9,7 @@ from app.companion.games.ttt import (
     minimax,
     pick_mickey_cell,
     winner_of,
+    winning_cell,
 )
 
 
@@ -56,13 +59,25 @@ def test_medium_blocks_fork_after_opposite_corners() -> None:
     assert cell in {1, 3, 5, 7}
 
 
+def test_easy_takes_a_win_but_does_not_always_block() -> None:
+    win_board = ["o", "o", None, "x", "x", None, None, None, None]
+    assert winning_cell(win_board, "o") == 2
+    assert pick_mickey_cell(win_board, "easy", random.Random(0)) == 2
+    block_board = ["x", None, "x", None, "o", None, None, None, None]
+    picks = {
+        pick_mickey_cell(block_board, "easy", random.Random(seed))
+        for seed in range(40)
+    }
+    assert 1 in picks
+    assert picks - {1}
+
+
 def test_easy_seeded_rng_can_diverge_from_minimax() -> None:
     board = ["x", None, "x", None, "o", None, None, None, None]
     match = TttMatch()
     match.start("easy")
     match._rng.seed(0)
     picks = {pick_mickey_cell(board, "easy", match._rng) for _ in range(40)}
-    assert 1 in picks
     assert picks - {1}
 
 

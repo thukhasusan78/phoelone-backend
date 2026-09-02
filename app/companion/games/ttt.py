@@ -12,7 +12,6 @@ Difficulty = Literal["easy", "medium"]
 
 PLAYER: Mark = "x"
 MICKEY: Mark = "o"
-EASY_RANDOM = 0.4
 
 _LINES = (
     (0, 1, 2),
@@ -82,6 +81,17 @@ def minimax(
     return best_score, best_cell
 
 
+def winning_cell(board: list[Mark | None], mark: Mark) -> int | None:
+    want = "mickey" if mark == MICKEY else "player"
+    for cell in empty_cells(board):
+        board[cell] = mark
+        won = winner_of(board) == want
+        board[cell] = None
+        if won:
+            return cell
+    return None
+
+
 def pick_mickey_cell(
     board: list[Mark | None],
     difficulty: Difficulty,
@@ -90,18 +100,21 @@ def pick_mickey_cell(
     cells = empty_cells(board)
     if not cells:
         raise ValueError("no_moves")
+    if difficulty == "easy":
+        win = winning_cell(board, MICKEY)
+        if win is not None:
+            return win
+        return rng.choice(cells)
     _, best = minimax(board, MICKEY)
     if best is None:
         return cells[0]
-    if difficulty == "easy" and rng.random() < EASY_RANDOM:
-        return rng.choice(cells)
     return best
 
 
 @dataclass
 class TttMatch:
     match_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
-    difficulty: Difficulty = "medium"
+    difficulty: Difficulty = "easy"
     board: list[Mark | None] = field(default_factory=empty_board)
     phase: Phase = "your_turn"
     winner: Winner | None = None
@@ -109,7 +122,7 @@ class TttMatch:
     _pending: int | None = field(default=None, repr=False, compare=False)
     _rng: random.Random = field(default_factory=random.Random)
 
-    def start(self, difficulty: str = "medium") -> dict[str, Any]:
+    def start(self, difficulty: str = "easy") -> dict[str, Any]:
         level: Difficulty = "easy" if difficulty == "easy" else "medium"
         self.match_id = uuid.uuid4().hex[:12]
         self.difficulty = level

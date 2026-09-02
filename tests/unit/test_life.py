@@ -40,6 +40,16 @@ def test_care_pet_raises_happiness_and_clamps() -> None:
     assert state.happiness == 100
 
 
+def test_care_pickup_raises_happiness_less_than_pet() -> None:
+    pet = empty_care("aa:bb:cc:dd:ee:ff", "cid")
+    pickup = empty_care("aa:bb:cc:dd:ee:ff", "cid")
+    apply_care(pet, "pet")
+    apply_care(pickup, "pickup")
+    assert pickup.happiness > 55
+    assert pickup.happiness < pet.happiness
+    assert pickup.bond < pet.bond
+
+
 def test_care_decay_only_after_neglect() -> None:
     state = empty_care("aa:bb:cc:dd:ee:ff", "cid")
     apply_care(state, "pet")

@@ -194,33 +194,62 @@ LLM_TOOLS: dict[str, dict[str, Any]] = {
     "self.phoe_lone.imu.get_reading": {
         "name": "self.phoe_lone.imu.get_reading",
         "description": (
-            "Read the MPU6050 IMU. Returns wired:true with ax/ay/az, gx/gy/gz, pitch, roll, "
-            "temp_c, and event (still|moving|pickup|putdown|fall|shake) when the sensor is live; "
-            "wired:false on stub firmware. If wired:false or ok:false, say the sensor is not "
-            "connected or failed — never invent accelerometer or gyro values. "
-            "Use for 'are you being held' or 'did you fall'. If event is fall, call "
-            "self.otto.stop if moving; do not walk."
+            "Read the live MPU6050 IMU (wired:true). Returns ax/ay/az (g), gx/gy/gz (deg/s), "
+            "pitch, roll, temp_c, and event (still|moving|pickup|putdown|fall|shake). "
+            "If ok:false (I2C fail), say the sensor failed — never invent accelerometer or gyro "
+            "values. Use for 'are you being held' or 'did you fall'. If event is fall, call "
+            "self.otto.stop if moving; do not walk. The body already stops on-device. "
+            "Same sensor as self.mickey.imu.get_reading."
         ),
         "inputSchema": _object({}),
     },
     "self.phoe_lone.light.get_level": {
         "name": "self.phoe_lone.light.get_level",
         "description": (
-            "Read the light sensor. Returns wired:true with lux, bucket "
-            "(dark|dim|indoor|bright), and raw when live; wired:false on stub firmware. "
-            "If wired:false or ok:false, say the sensor is not connected — never invent a lux "
-            "reading. Call this when the user asks if it is dark or bright."
+            "Read the light sensor. This Mickey SKU has no light sensor (wired:false). "
+            "Never invent a lux reading. If the user asks if it is dark or bright, say the "
+            "light sensor is not connected. Same stub as self.mickey.light.get_level."
         ),
         "inputSchema": _object({}),
     },
     "self.phoe_lone.touch.get_state": {
         "name": "self.phoe_lone.touch.get_state",
         "description": (
-            "Read the head touch sensor. Returns wired:true with touched, count, and ms_held "
-            "when live; wired:false on stub firmware. A pet may also arrive as an MCP "
-            "notification — do not require the user to say they petted you. "
-            "If wired:false or ok:false, say the sensor is not connected. "
-            "Never invent touch state."
+            "Read the live TTP223 head touch sensor (wired:true). Returns touched, count, "
+            "and ms_held. A pet may also arrive as an MCP notification — do not require the "
+            "user to say they petted you. If ok:false, say the sensor failed. Never invent "
+            "touch state. Same sensor as self.mickey.touch.get_state."
+        ),
+        "inputSchema": _object({}),
+    },
+    "self.mickey.imu.get_reading": {
+        "name": "self.mickey.imu.get_reading",
+        "description": (
+            "Read the live MPU6050 IMU (wired:true). Returns ax/ay/az (g), gx/gy/gz (deg/s), "
+            "pitch, roll, temp_c, and event (still|moving|pickup|putdown|fall|shake). "
+            "If ok:false (I2C fail), say the sensor failed — never invent accelerometer or gyro "
+            "values. Use for 'are you being held' or 'did you fall'. If event is fall, call "
+            "self.otto.stop if moving; do not walk. The body already stops on-device. "
+            "Same sensor as self.phoe_lone.imu.get_reading."
+        ),
+        "inputSchema": _object({}),
+    },
+    "self.mickey.light.get_level": {
+        "name": "self.mickey.light.get_level",
+        "description": (
+            "Read the light sensor. This Mickey SKU has no light sensor (wired:false). "
+            "Never invent a lux reading. If the user asks if it is dark or bright, say the "
+            "light sensor is not connected. Same stub as self.phoe_lone.light.get_level."
+        ),
+        "inputSchema": _object({}),
+    },
+    "self.mickey.touch.get_state": {
+        "name": "self.mickey.touch.get_state",
+        "description": (
+            "Read the live TTP223 head touch sensor (wired:true). Returns touched, count, "
+            "and ms_held. A pet may also arrive as an MCP notification — do not require the "
+            "user to say they petted you. If ok:false, say the sensor failed. Never invent "
+            "touch state. Same sensor as self.phoe_lone.touch.get_state."
         ),
         "inputSchema": _object({}),
     },
@@ -349,12 +378,21 @@ MICKEY_DEVICE_TOOLS = (
     "self.mickey.sleep.now",
 )
 
-# Only expose to Gemini when tools/list returned them (Mickey I2C is often NC).
+# Only expose to Gemini when tools/list returned them. Live Mickey lists both
+# self.mickey.* and self.phoe_lone.* aliases; enrich_discovered_tools keeps one.
 PHOE_LONE_SENSOR_TOOLS = (
     "self.phoe_lone.imu.get_reading",
     "self.phoe_lone.light.get_level",
     "self.phoe_lone.touch.get_state",
 )
+
+MICKEY_SENSOR_TOOLS = (
+    "self.mickey.imu.get_reading",
+    "self.mickey.light.get_level",
+    "self.mickey.touch.get_state",
+)
+
+SENSOR_ALIAS_PAIRS = tuple(zip(MICKEY_SENSOR_TOOLS, PHOE_LONE_SENSOR_TOOLS, strict=True))
 
 
 def is_forbidden(name: str) -> bool:

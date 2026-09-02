@@ -108,10 +108,14 @@ log = get_logger(__name__)
 
 _MUSIC_DONE_BURMESE = "သီချင်း ပြီးသွားပါပြီနော်။"
 _PET_BURMESE = "ပွေ့ပေးလို့ ဝမ်းသာတယ်နော်။"
+_PICKUP_BURMESE = "ဟေ့ ချီလိုက်ပြီလား။"
+_FALL_BURMESE = "နာတယ်နော်။"
 
 _SENSOR_EVENTS = frozenset({"pickup", "putdown", "fall", "pet", "sleep"})
 _SENSOR_MIN_INTERVAL_S = 0.5
+_SENSOR_SPEECH_GAP_S = 8.0
 _FALL_INHIBIT_S = 5.0
+_SENSOR_CARE_KINDS = {"pet": "pet", "pickup": "pickup"}
 _KEEPALIVE_GENERATION = -1
 
 # Uplink Opus frame is 60 ms @ 16 kHz mono PCM16.
@@ -289,6 +293,7 @@ class DeviceSession:
         self._last_pong_monotonic = 0.0
         self._motion_inhibited_until = 0.0
         self._sensor_event_last: dict[str, float] = {}
+        self._last_sensor_speech = 0.0
         self._companion_lock = asyncio.Lock()
         self._companion_user_text: str | None = None
         self._owner_reconnect_pending = False
@@ -654,6 +659,11 @@ class DeviceSession:
         )
         if event == "fall":
             self._motion_inhibited_until = now + _FALL_INHIBIT_S
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self._react_to_fall())
+            except RuntimeError:
+                pass
             return
         if event == "sleep":
             self._mark_departing("sleeping")
@@ -663,9 +673,11 @@ class DeviceSession:
             try:
                 loop = asyncio.get_running_loop()
                 loop.create_task(self._credit_sensor_care(event))
-                if event == "pet":
-                    if self._pet_task is None or self._pet_task.done():
+                if not self._sensor_speech_blocked():
+                    if event == "pet":
                         self._pet_task = loop.create_task(self._react_to_pet())
+                    else:
+                        self._pet_task = loop.create_task(self._react_to_pickup())
             except RuntimeError:
                 pass
             return
@@ -1342,8 +1354,11 @@ class DeviceSession:
         except Exception as exc:  # noqa: BLE001
             log.info("companion.care_credit_failed", error=str(exc), kind=kind)
 
-    async def _credit_sensor_care(self, _event: str) -> None:
-        await self._credit_interaction("pet")
+    async def _credit_sensor_care(self, event: str) -> None:
+        kind = _SENSOR_CARE_KINDS.get(event)
+        if kind is None:
+            return
+        await self._credit_interaction(kind)
 
     def _pet_busy(self) -> bool:
         if self._closed or self.brain is None:
@@ -1356,9 +1371,23 @@ class DeviceSession:
             return True
         return False
 
+    def _sensor_speech_in_flight(self) -> bool:
+        return self._pet_task is not None and not self._pet_task.done()
+
+    def _sensor_speech_blocked(self) -> bool:
+        if self._sensor_speech_in_flight():
+            return True
+        return time.monotonic() - self._last_sensor_speech < _SENSOR_SPEECH_GAP_S
+
+    def _mark_sensor_speech(self) -> None:
+        self._last_sensor_speech = time.monotonic()
+
     async def _react_to_pet(self) -> None:
         if self._pet_busy():
             return
+        if time.monotonic() - self._last_sensor_speech < _SENSOR_SPEECH_GAP_S:
+            return
+        self._mark_sensor_speech()
         notify = getattr(self.brain, "notify_pet", None)
         send = getattr(self.brain, "send_text_turn", None)
         if not callable(notify) and not callable(send):
@@ -1414,6 +1443,41 @@ class DeviceSession:
                     await speak_task
                 except (asyncio.CancelledError, Exception):
                     pass
+            if self.state.state != SessionState.CLOSED and generation == self.state.generation:
+                self._set_state(SessionState.READY, force=True)
+
+    async def _react_to_pickup(self) -> None:
+        if self._pet_busy():
+            return
+        if time.monotonic() - self._last_sensor_speech < _SENSOR_SPEECH_GAP_S:
+            return
+        self._mark_sensor_speech()
+        generation = self.state.generation
+        self._set_state(SessionState.THINKING, force=True)
+        try:
+            await self._speak(_PICKUP_BURMESE, generation, emotion="surprised")
+        except Exception as exc:  # noqa: BLE001
+            log.info("session.pickup_react_failed", error=str(exc), session_id=self.session_id)
+        finally:
+            if self.state.state != SessionState.CLOSED and generation == self.state.generation:
+                self._set_state(SessionState.READY, force=True)
+
+    async def _react_to_fall(self) -> None:
+        await self._queue_json(
+            alert(self.session_id, "Warning", "Fall detected", "sad"),
+        )
+        if self._pet_busy() or self._sensor_speech_in_flight():
+            return
+        if time.monotonic() - self._last_sensor_speech < _SENSOR_SPEECH_GAP_S:
+            return
+        self._mark_sensor_speech()
+        generation = self.state.generation
+        self._set_state(SessionState.THINKING, force=True)
+        try:
+            await self._speak(_FALL_BURMESE, generation, emotion="sad")
+        except Exception as exc:  # noqa: BLE001
+            log.info("session.fall_react_failed", error=str(exc), session_id=self.session_id)
+        finally:
             if self.state.state != SessionState.CLOSED and generation == self.state.generation:
                 self._set_state(SessionState.READY, force=True)
 
@@ -1817,6 +1881,8 @@ class DeviceSession:
         text = str(args.get("text") or "").strip()
         if not text:
             raise CompanionError("invalid", "Type a message first.")
+        if self._is_farewell(text):
+            await self._request_exit()
         self._companion_user_text = text
         self._tts_played = False
         generation = self.state.generation
@@ -1871,6 +1937,8 @@ class DeviceSession:
             self._companion_user_text = None
             if self.state.state != SessionState.CLOSED:
                 self._set_state(SessionState.READY, force=True)
+            if self._awaiting_wake and not self._closed:
+                await self._notify_device_idle()
 
     async def _consume_speakable(self, generation: int) -> None:
         """Speak Gemini sentences as they are published — do not wait for the full turn."""

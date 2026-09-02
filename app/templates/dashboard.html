@@ -267,18 +267,32 @@
     .ttt-cell {
       aspect-ratio: 1;
       border-radius: 18px;
-      font-size: 1.8rem;
+      font-size: 2.4rem;
       font-weight: 800;
       padding: 0;
-      background: linear-gradient(180deg, #3b0764, #1e1b4b);
-      border: 1px solid #c084fc66;
+      color: #fffef7;
+      -webkit-text-fill-color: #fffef7;
+      background: linear-gradient(180deg, #4c1d95, #1e1b4b);
+      border: 1px solid #e9d5ff99;
       box-shadow: 0 8px 20px #7c3aed33;
+    }
+    .ttt-cell.mark-x {
+      color: #a5f3fc;
+      -webkit-text-fill-color: #a5f3fc;
+    }
+    .ttt-cell.mark-o {
+      color: #fde68a;
+      -webkit-text-fill-color: #fde68a;
     }
     .ttt-cell.last {
       border-color: #34d39988;
       box-shadow: 0 0 0 3px #34d39933, 0 10px 28px #34d39944;
     }
-    .ttt-cell:disabled { opacity: 0.55; }
+    .ttt-cell:disabled {
+      opacity: 1;
+      cursor: default;
+      box-shadow: 0 8px 20px #7c3aed33;
+    }
     @keyframes tab-pop {
       0% { transform: scale(0.85); }
       60% { transform: scale(1.18); }
@@ -612,7 +626,7 @@
         <span class="pill" id="battery-pill">Battery —</span>
         <span class="pill" id="mood-pill">Mood —</span>
       </div>
-      <div class="banner" id="wake-banner">Wake Mickey (button or wake word), then play.</div>
+      <div class="banner" id="wake-banner">Mickey is offline. He reconnects on Wi-Fi, or press his button.</div>
       <div class="banner err" id="error-banner"></div>
     </header>
 
@@ -685,7 +699,7 @@
 
         <section>
           <h2><span class="sec-ico" aria-hidden="true">#️⃣</span>Tic-tac-toe</h2>
-          <p class="score" id="ttt-status">Tap New game. You are X — Mickey is O.</p>
+          <p class="score" id="ttt-status">Tap New game. You are X — Mickey plays easy.</p>
           <div class="ttt-board" id="ttt-board">
             <button type="button" class="ttt-cell" data-cell="0" aria-label="square 1"></button>
             <button type="button" class="ttt-cell" data-cell="1" aria-label="square 2"></button>
@@ -699,6 +713,7 @@
           </div>
           <div class="row" style="margin-bottom: 10px">
             <button type="button" id="btn-ttt-new"><span class="ico" aria-hidden="true">✨</span>New game</button>
+            <button class="ghost" type="button" id="btn-ttt-hard"><span class="ico" aria-hidden="true">🧠</span>Hard</button>
           </div>
         </section>
       </div>
@@ -1088,6 +1103,8 @@
       if (newBtn) newBtn.disabled = !playable || thinking || speaking;
       const tttNew = document.getElementById("btn-ttt-new");
       if (tttNew) tttNew.disabled = !playable || thinking || speaking;
+      const tttHard = document.getElementById("btn-ttt-hard");
+      if (tttHard) tttHard.disabled = !playable || thinking || speaking;
       const chatOff = !playable || thinking || speaking || chatBusy || counting;
       chatInput.disabled = chatOff;
       chatSend.disabled = chatOff;
@@ -1266,11 +1283,14 @@
         const idx = Number(btn.dataset.cell);
         const mark = board[idx];
         btn.textContent = marks[mark] || "";
+        btn.classList.toggle("mark-x", mark === "x");
+        btn.classList.toggle("mark-o", mark === "o");
         btn.classList.toggle("last", msg.last_cell === idx);
       });
       tttStatus.classList.toggle("over", tttPhase === "match_over");
+      const hard = msg.difficulty === "medium";
       if (tttPhase === "your_turn") {
-        tttStatus.textContent = "Your turn — you are X.";
+        tttStatus.textContent = hard ? "Your turn — hard mode." : "Your turn — you are X.";
       } else if (tttPhase === "mickey_turn") {
         tttStatus.textContent = "Mickey is thinking…";
       } else if (msg.winner === "player") {
@@ -1280,7 +1300,9 @@
       } else if (msg.winner === "draw") {
         tttStatus.textContent = "Draw. Tap New game to play again.";
       } else {
-        tttStatus.textContent = "Tap New game. You are X — Mickey is O.";
+        tttStatus.textContent = hard
+          ? "Hard mode. You are X — Mickey is O."
+          : "Tap New game. You are X — Mickey plays easy.";
       }
       setControls();
     }
@@ -1387,7 +1409,7 @@
           send({ type: "settings.get" });
         }
       } else {
-        wakeBanner.textContent = msg.hint || "Wake Mickey (button or wake word), then play.";
+        wakeBanner.textContent = msg.hint || "Mickey is offline. He reconnects on Wi-Fi, or press his button.";
         wakeBanner.classList.add("show");
       }
       setControls();
@@ -1512,7 +1534,15 @@
       rpsRoundId = null;
       clearRpsPick();
       tttPhase = "your_turn";
-      send({ type: "game.start", game: "ttt" });
+      send({ type: "game.start", game: "ttt", difficulty: "easy" });
+    });
+    document.getElementById("btn-ttt-hard").addEventListener("click", () => {
+      stopRpsCountdown();
+      rpsPhase = "awaiting_throw";
+      rpsRoundId = null;
+      clearRpsPick();
+      tttPhase = "your_turn";
+      send({ type: "game.start", game: "ttt", difficulty: "medium" });
     });
     tttCells.forEach((btn) => {
       btn.addEventListener("click", () => {

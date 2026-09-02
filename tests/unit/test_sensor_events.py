@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import time
 from unittest.mock import AsyncMock, MagicMock
 
@@ -62,6 +63,24 @@ def test_fall_sets_motion_inhibit() -> None:
     before = time.monotonic()
     session._on_sensor_event({"event": "fall"})
     assert session._motion_inhibited_until > before
+
+
+@pytest.mark.asyncio
+async def test_fall_queues_alert_without_tts_while_listening() -> None:
+    session = _session()
+    session.state.state = SessionState.LISTENING
+    session._speak = AsyncMock()
+    session._on_sensor_event({"event": "fall"})
+    await asyncio.sleep(0)
+    payloads: list[str] = []
+    while True:
+        try:
+            item = session.out_queue.get_nowait()
+        except asyncio.QueueEmpty:
+            break
+        payloads.append(item.payload)
+    assert any("Fall detected" in payload and "alert" in payload for payload in payloads)
+    session._speak.assert_not_awaited()
 
 
 def test_sensor_rate_limit_same_event() -> None:
@@ -149,6 +168,36 @@ async def test_pet_skips_internal_event_while_speaking() -> None:
     await session._react_to_pet()
     assert brain.pet_events == []
     assert brain.text_turns == []
+
+
+@pytest.mark.asyncio
+async def test_pickup_does_not_call_notify_pet() -> None:
+    session = _session()
+    session.ws.app.state.companion = None
+    session.state.state = SessionState.READY
+    brain = FakeBrain()
+    session.brain = brain
+    session._speak = AsyncMock()
+    await session._react_to_pickup()
+    assert brain.pet_events == []
+    session._speak.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sensor_speech_stacking_skips_second_line() -> None:
+    session = _session()
+    session.ws.app.state.companion = None
+    session.state.state = SessionState.READY
+    brain = FakeBrain()
+    session.brain = brain
+    session._consume_speakable = AsyncMock()
+    session._speak = AsyncMock()
+    await session._react_to_pet()
+    session._speak.reset_mock()
+    brain.pet_events.clear()
+    await session._react_to_pickup()
+    session._speak.assert_not_awaited()
+    assert brain.pet_events == []
 
 
 def test_keepalive_not_dropped_on_generation_mismatch() -> None:

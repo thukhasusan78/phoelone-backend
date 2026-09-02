@@ -279,7 +279,7 @@ Same hub + `companion_action("rps_react")` / `ttt_react` pattern as Phase 1. New
 **Status: shipped.** Play tab has a 3×3 board. Engine is [`app/companion/games/ttt.py`](app/companion/games/ttt.py). Protocol is in [backend_spec.md](backend_spec.md) §12.
 
 - Board only on the web.
-- **Minimax on the server** (easy/medium). Do not spend Gemini tokens per move.
+- **Minimax on the server** for Hard (`medium`). New game defaults to **easy**: take an immediate O win, otherwise a random cell (does not block). Do not spend Gemini tokens per move.
 - Reaction vocabulary: `thinking` + `swing` while “deciding”; win/draw/lose same as RPS (`jump` / `home` / `sit`).
 - Protocol: `game.start { game: "ttt" }`, `game.move { game: "ttt", cell: 0-8 }`, `game.state` with `board`, `turn`, `winner`.
 

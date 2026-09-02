@@ -17,6 +17,7 @@ CARE_TZ_OFFSET_MINUTES = 390
 
 _CARE_DELTA: dict[str, dict[str, int]] = {
     "pet": {"happiness": 8, "bond": 3},
+    "pickup": {"happiness": 3, "bond": 2},
     "feed": {"happiness": 4},
     "chat": {"happiness": 3, "bond": 1},
     "voice": {"bond": 1},

@@ -58,6 +58,7 @@ def test_activate_sets_cookie_and_opens_dashboard(app) -> None:
         assert "rps-chant" in dashboard.text
         assert "ttt-board" in dashboard.text
         assert "btn-ttt-new" in dashboard.text
+        assert "btn-ttt-hard" in dashboard.text
         assert "btn-play" in dashboard.text
         assert "alarm-time" in dashboard.text
         assert "set-volume" in dashboard.text
@@ -121,7 +122,8 @@ def test_companion_offline_dance(app) -> None:
             assert hello["type"] == "hello"
             presence = _recv_until(ws, "presence")
             assert presence["online"] is False
-            assert "Wake Mickey" in (presence.get("hint") or "")
+            assert "offline" in (presence.get("hint") or "").lower()
+            assert "Wake Mickey" not in (presence.get("hint") or "")
             ws.send_json({"type": "command.dance", "action": "jump"})
             error = _recv_until(ws, "error")
             assert error["code"] == "offline"

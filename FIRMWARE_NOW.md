@@ -348,3 +348,191 @@ patch -p1 < /path/to/phoe_lone_server/firmware/otto-robot/patches/003-stop-coope
 6. After Slice 5: phone Play tab without wake word.
 
 If audio, wake word, or display regresses, revert the last slice before continuing.
+
+---
+
+## 11. Next sprint (Slices 6–9) — append 2026-09-02
+
+**Do not delete Slices 1–5 above.** They remain the historical brief. This section is what the Firmware Agent implements **next**.
+
+On `phoelone` `main`, Slices 1–5 are largely already flashed (`mickey_sensors.cc`, `mickey_behavior.cc`, `CONFIG_COMPANION_KEEP_CHANNEL`, ping/pong, hands NC, cooperative stop). IMU/touch are live; light is still `wired: false`. Idle director exists (face first; body after 60 s; no tip-over clips). Always-on `/xiaozhi/v1/` is on.
+
+The VPS already handles `ping`/`pong`, `notifications/phoe_lone.event` (pet / pickup / fall / sleep), catalog aliases for `self.mickey.*` and `self.phoe_lone.*`, and dashboard copy that does not say “wake first.” Cloud is still an enhancement. Idle life, pet, pickup, and fall **must keep working with the WebSocket closed**.
+
+```
+Slice 6  emotion → tiny motion (P1.2)     ← start here
+Slice 7  idle director refinements
+Slice 8  face consistency (neutral vs staticstate)
+Slice 9  light sensor (only if the module is on the desk)
+```
+
+Slice 9 waits on a pin photo. Do not invent GPIOs. Slices 6–8 need no new hardware. Stop after each slice and run that slice’s acceptance list.
+
+Live idle clips (refine in Slice 7; do not throw them away): face `winking` any time, `sleepy` after 60 s; body after 60 s = slow `swing` (amount 20, period 2800 ms) or reduced `walk` (amount 18, period 3200 ms). **No** tiptoe-swing / shake-leg / bend. Fidget IMU mask while a clip runs (+400 ms). Fidget **off** while listening or speaking. Incoming `type: llm` emotion yields the director for 30 s.
+
+LCD CS on this SKU is strapped to GND (`display_cs_pin = NC`). **Never drive GPIO 12.**
+
+---
+
+## 12. Safety constraints (Slices 6–9)
+
+These override cleverness. Do not violate them.
+
+1. **4-servo balance.** No large dual-leg / dual-foot oscillation. No `shake_leg`, `tiptoe_swing`, or `bend` in idle or emotion maps (they tip this SKU). Emotion motion is **jitter / tiny swing / sit / freeze / home** only.
+2. **Cap duration.** Any emotion-triggered motion **&lt; 800 ms**, then home (except `sit`, which may hold). Queue depth **1**. If Otto is already busy with user/dashboard MCP, **skip** the gesture.
+3. **Never block Opus.** Do not wait on servos from the audio / WS task. Gesture goes through the existing fidget/action queue (`OttoTryQueueFidget` / equivalent), same priority as idle clips.
+4. **Preempt immediately:** wake word, GPIO 0, pet, pickup, fall, `OpenAudioChannel`, `self.otto.action` / `servo_sequences` / `stop`, sleep. Emotion gestures yield to all of these.
+5. **Mic hot = body still.** No fidget and no emotion gesture while `kDeviceStateListening` or `kDeviceStateSpeaking`. Face GIF may still change.
+6. **Fall is local.** `OttoStopAndHome()` **&lt; 200 ms** before any notify. Do not wait on the VPS. Keep the fidget IMU mask so self-motion does not false-fall; true freefall (`|a| < 0.25 g`) still homes.
+7. **Low battery.** No body fidget, no emotion walk/swing, no MCP dance. Home + `sleepy` + dim still allowed. `self.otto.stop` / `home` still work.
+8. **No cloud fidget.** Do not call Gemini / open a turn to pick a blink. Do not auto-dance to music unless MCP asked.
+9. **Do not double-dance.** The VPS already refuses Otto tools on pet/pickup/fall. Firmware must not queue a second showcase/walk on those events. Pet stays happy GIF + existing tiny jitter.
+10. **Pins and protocol.** No remap of §1. No `type: iot`. No MQTT voice. No `bright` / `dark` MCP notifications this sprint (local dim is enough). No protocol v2 / `features.aec`. Lab OTA stays `0.0.0` + 404 `none.bin`, `force: 0`.
+
+Leave both `self.mickey.*` and `self.phoe_lone.*` sensor aliases unless you coordinate a backend PR. The VPS de-dupes to Mickey names when both are listed.
+
+---
+
+## 13. Slice 6 — Emotion → tiny motion (P1.2)
+
+**Owner:** firmware. **Goal:** a voice/`llm` smile moves the body a little, without fighting audio or tipping over.
+
+**Files:** `main/boards/mickey/mickey_behavior.cc` (and `.h`), hook from the existing `RegisterExternalEmotionCallback` / `OnIncomingJson` `type: llm` path. Reuse `OttoTryQueueFidget` — do **not** call `self.otto.action` from C++ by forging MCP.
+
+Today `type: llm` only changes the GIF and pauses the idle director for 30 s. The body stays still. Implement a **capped table**:
+
+| Incoming emotion (and aliases) | Face (already SetEmotion) | Body (new, idle only) |
+|--------------------------------|---------------------------|------------------------|
+| `happy`, `laughing`, `loving` | keep GIF | `kOttoFidgetJitter` **or** 1-cycle slow `swing` amount ≤ 12, duration &lt; 800 ms, then home |
+| `sad`, `sleepy` | keep GIF | **no** walk. Optional `sit` **or** still + home. If sit, do not auto-home until next clip / wake / pet |
+| `surprised` | keep GIF | freeze: `OttoCancelFidget` only (same as pickup). No extra jump |
+| `angry` | keep GIF | **skip body** (shake_leg tips this SKU) |
+| `thinking`, `confused`, `listening`, `speaking`, `neutral`, `staticstate`, others | keep GIF | no body |
+
+Rules:
+
+- Fire **once** per incoming `llm` emotion, not on every idle tick.
+- Skip if not `kDeviceStateIdle`, if `OttoIsBusy()`, if `OttoMotionInhibited()`, if pet afterglow / pickup pause is active.
+- After the gesture, keep the 30 s yield so idle clips do not immediately overwrite the face.
+- Do **not** start a cloud turn. Do **not** walk on every smile.
+
+### Acceptance (Slice 6)
+
+- [ ] Dashboard or voice sets emotion `happy` while idle-connected: tiny jitter or sway &lt; 800 ms, then still; audio uninterrupted.
+- [ ] Same test while **listening**: face may change; **no** servo motion.
+- [ ] Emotion `sad`: sit or still; robot does not tip; no walk.
+- [ ] Emotion `angry`: face only.
+- [ ] Wake word during the tiny gesture cancels it immediately.
+- [ ] User/dashboard `self.otto.action` still preempts; no stuck fidget flag.
+- [ ] Pet jitter and emotion jitter do not queue on top of each other (depth 1).
+
+---
+
+## 14. Slice 7 — Idle director refinements
+
+**Owner:** firmware. **Goal:** more alive on the desk without becoming a drunk waiter. **No cloud.**
+
+**File:** `mickey_behavior.cc`. Keep the 60 s body gate and the no-tip clip list.
+
+Changes:
+
+1. **Face variety before body.** Weighted face-only pool while `idle_ms < 60000`: add `loving` (and keep `winking`). Do not add body to this pool. After 60 s, keep current `sleepy` / slow sway / slow step.
+2. **Reset the 60 s body gate after real interaction.** Already resets on pet, pickup, and non-fidget Otto busy. Also reset when leaving `Listening`/`Speaking` back to `Idle` (chat or dashboard dance just finished) so he does **not** immediately shuffle. A 10–20 s face-only pause after a conversation is better than an instant walk.
+3. **Time of day (if `has_server_time_`).** After ~22:00 local: prefer `sleepy` face, skip body clips, optionally dim backlight one step. Morning (after alarm `QueueMorningWake` or hour ≥ 7): prefer `winking` / `happy` face, allow body clips as today. If server time is unknown, keep the current 60 s behavior.
+4. **Keep fidget off while listening/speaking.** Already true — do not regress.
+5. **Do not ask Gemini to pick a fidget.** Already true — do not regress.
+
+Do **not** widen body amplitude. Do **not** add moonwalk / jump / showcase to idle.
+
+### Acceptance (Slice 7)
+
+- [ ] First minute on the desk: blinks / loving face; **no** walk.
+- [ ] After 60 s with nobody touching him: occasional slow sway or tiny step; still no tip-over clips.
+- [ ] After a voice chat or dashboard dance: at least ~10 s of still/face-only before body clips resume.
+- [ ] At night with synced clock: sleepy face, no body fidget; backlight not full-blast.
+- [ ] Wake word / button / pet / pickup still cancel immediately.
+- [ ] WS closed: same personality (idle director does not need the cloud).
+
+---
+
+## 15. Slice 8 — Face consistency
+
+**Owner:** firmware. **Goal:** stop flickering `neutral` vs `staticstate` after reconnect / alert / pet.
+
+Today the idle director uses `staticstate` / `winking` / `happy` / `sleepy`. `Application::DismissAlert` and some idle-state handlers still `SetEmotion("neutral")`. After a WS error or companion reconnect the face can jump.
+
+Pick **one** idle rest face: `staticstate` (Otto GIF default on this SKU).
+
+- `DismissAlert` in idle → `staticstate` (not `neutral`).
+- Entering `kDeviceStateIdle` after listening/speaking → `staticstate` unless pet afterglow or a 30 s llm yield is still active.
+- Pet afterglow end already returns to `staticstate` — keep that.
+- Do not remap GIF assets.
+
+### Acceptance (Slice 8)
+
+- [ ] After dashboard Stop / TTS end / ping-only idle: rest face is `staticstate`, not a random `neutral` flash.
+- [ ] Pet 3 s afterglow still `happy`, then `staticstate` + home.
+- [ ] `type: llm` emotion still shows for ~30 s, then the director resumes.
+
+---
+
+## 16. Slice 9 — Light sensor (hardware-gated)
+
+**Owner:** firmware. **Skip this slice if no BH1750 / VEML7700 / LDR is soldered.** Photograph the net first. Diff against §1.
+
+**Goal:** local night behavior (P1.5) with WS **closed**. MCP pull `wired: true`. **Do not** emit `bright` / `dark` notifications (spec forbids them this sprint).
+
+- I2C light on the MPU bus (41/42) preferred; mutex with MPU. Fallback: ADC1 GPIO 1 only.
+- Same SensorTask (`mickey_sensors.cc`); never I2C from WS/audio.
+- `self.mickey.light.get_level` and `self.phoe_lone.light.get_level`: `{ "wired": true, "lux": …, "bucket": "dark"|"dim"|"indoor"|"bright", "raw": … }`. Analog may omit `lux`. Unplug / fail → `{ "wired": true, "ok": false, "error": "…" }` — never invent lux.
+- Until the driver works, **keep** `wired: false` stubs (backend prompt already says light is unwired).
+- Local only: `bucket == dark` for N minutes → `sleepy` GIF + dim backlight. Bright → wake face (`staticstate` / `winking`). Idle director uses the bucket; do not spam servo motion on every lux tick.
+
+### Acceptance (Slice 9)
+
+- [ ] Serial: light buckets change with a flashlight.
+- [ ] MCP pull `wired: true` and plausible numbers.
+- [ ] Cover the sensor: sleepy + dim with **WS closed**, within a few seconds.
+- [ ] No `notifications/phoe_lone.event` with `bright` or `dark`.
+- [ ] Audio / wake word / MPU still clean.
+
+---
+
+## 17. Out of Slices 6–9 (still later)
+
+| Item | Why later |
+|------|-----------|
+| LCD `preview_image` / RPS icons (Phase 6b) | Needs `CONFIG_LV_USE_SNAPSHOT` plus static 240×240 assets on the VPS |
+| Signed OTA / dual-bank / `phoe-lone` board copy | Lab must stay `0.0.0` + 404 `none.bin`, `force: 0` |
+| Protocol v2 / server AEC / `listen: realtime` | Both sides must ship together; stay on v1 |
+| Music canned dance while a track plays (P1.6) | Optional; abort path must stay first. Do not start until Slice 6 is stable |
+| Drop `self.phoe_lone.*` sensor aliases | Backend still discovers both; leave aliases unless you coordinate a backend PR |
+| Camera / ToF | This SKU is no-camera |
+
+---
+
+## 18. File map for Slices 6–9 (phoelone tree)
+
+| Path | Slice |
+|------|--------|
+| `main/boards/mickey/mickey_behavior.cc` / `.h` | **6, 7, 8** |
+| `main/boards/mickey/otto_controller.cc` | 6 fidget queue only if a new `OttoFidget` kind is required |
+| `main/application.cc` | 8 `DismissAlert` rest face; 6 already has `llm` → `external_emotion_callback_` |
+| `main/boards/mickey/mickey_sensors.cc` / `.h` | **9** light driver + JSON; keep IMU/touch |
+| `main/boards/mickey/config.h` | **9** light `#define` only after pin photo |
+| `main/boards/mickey/config.json` | do not change OTA URL / `type: mickey` / `CONFIG_COMPANION_KEEP_CHANNEL` |
+
+Do **not** re-apply `firmware/otto-robot/patches/001–003` unless a rebase lost cooperative stop.
+
+---
+
+## 19. Extra smoke after Slices 6–9
+
+1. Hello within 10 s of Wi-Fi (no wake word — always-on WS).
+2. After Slice 6: `happy` llm gesture &lt; 800 ms in idle; **no** gesture while listening.
+3. After Slice 7: one minute of face-only, then slow sway; no tip.
+4. After Slice 8: idle rest face is `staticstate` after Stop / TTS end.
+5. Pet 800 ms: happy face + tiny jitter with WS closed.
+6. Tip the robot: servos home &lt; 200 ms; no watchdog.
+
+If audio, wake word, or display regresses, revert the last slice before continuing.

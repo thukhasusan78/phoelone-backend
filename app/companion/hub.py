@@ -23,11 +23,11 @@ from app.protocol.state import SessionState
 
 log = get_logger(__name__)
 
-WAKE_HINT = "Wake Mickey (button or wake word), then play."
+WAKE_HINT = "Mickey is offline. He reconnects on Wi-Fi, or press his button."
 SLEEP_HINT = "Mickey is sleeping. He will wake at his alarm, or press his button."
-REBOOT_HINT = "Mickey is restarting. Wait a moment, then wake him."
-ALARM_HINT = "Wake Mickey to change the alarm."
-SETTINGS_HINT = "Wake Mickey to change settings."
+REBOOT_HINT = "Mickey is restarting. Wait a moment; he will reconnect."
+ALARM_HINT = "Mickey is offline. Wait for him to reconnect to change the alarm."
+SETTINGS_HINT = "Mickey is offline. Wait for him to reconnect to change settings."
 
 _PRESENCE_INTERVAL_S = 15.0
 _NEXT_ROUND_DELAY_S = 1.15
@@ -298,7 +298,7 @@ class CompanionHub:
         key = device_id.lower()
         self._cancel_game(key)
         if game == "ttt":
-            difficulty = str(message.get("difficulty") or "medium")
+            difficulty = str(message.get("difficulty") or "easy")
             match = TttMatch()
             started = match.start(difficulty)
             self._matches[key] = match
